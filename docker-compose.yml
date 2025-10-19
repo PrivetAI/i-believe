@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: ai-video-generator
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./output:/app/output
+      - ./cache:/app/cache
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    mem_limit: 8g
+    cpus: 4
