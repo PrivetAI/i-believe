@@ -3,6 +3,7 @@ FROM python:3.11-slim
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     ffmpeg \
+    imagemagick \
     libsm6 \
     libxext6 \
     libxrender-dev \
@@ -29,6 +30,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/
+
+# Pre-download Whisper model to cache
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('medium', device='cpu', compute_type='int8', download_root='/root/.cache/huggingface')"
 
 # Create necessary directories
 RUN mkdir -p /app/output /app/cache /app/logs

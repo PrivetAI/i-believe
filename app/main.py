@@ -392,25 +392,31 @@ if st.session_state.generated_video_path:
     video_path = Path(st.session_state.generated_video_path)
     
     if video_path.exists():
-        # Video player
-        with open(video_path, 'rb') as video_file:
-            video_bytes = video_file.read()
-            st.video(video_bytes)
+        # Video player in column to control width
+        col1, col2, col3 = st.columns([1, 2, 1])
         
-        # Download button
-        st.download_button(
-            label="⬇️ Download Video",
-            data=video_bytes,
-            file_name=video_path.name,
-            mime="video/mp4"
-        )
+        with col2:
+            with open(video_path, 'rb') as video_file:
+                video_bytes = video_file.read()
+                st.video(video_bytes)
         
-        # Video info
-        file_size_mb = video_path.stat().st_size / (1024 * 1024)
-        st.caption(f"File size: {file_size_mb:.2f} MB | Resolution: {resolution[0]}x{resolution[1]}")
+        # Download button and info
+        col1, col2 = st.columns([1, 3])
+        
+        with col1:
+            st.download_button(
+                label="⬇️ Download Video",
+                data=video_bytes,
+                file_name=video_path.name,
+                mime="video/mp4",
+                use_container_width=True
+            )
+        
+        with col2:
+            file_size_mb = video_path.stat().st_size / (1024 * 1024)
+            st.caption(f"📊 File size: {file_size_mb:.2f} MB | Resolution: {resolution[0]}x{resolution[1]}")
     else:
         st.error("Video file not found")
-
 # Logs section
 with st.expander("📋 View Logs"):
     log_file_path = Path("logs/app.log")

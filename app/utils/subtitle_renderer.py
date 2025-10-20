@@ -3,10 +3,17 @@ Subtitle rendering with word-by-word live caption style
 """
 from typing import List, Dict
 from moviepy.editor import TextClip, CompositeVideoClip
+from moviepy.config import change_settings
 import config
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Configure ImageMagick binary path
+try:
+    change_settings({"IMAGEMAGICK_BINARY": "/usr/bin/convert"})
+except:
+    pass
 
 
 def render_subtitles(video_clip, words: List[Dict], video_size: tuple) -> CompositeVideoClip:
@@ -45,9 +52,9 @@ def render_subtitles(video_clip, words: List[Dict], video_size: tuple) -> Compos
             # Create text clip for current word with highlight style
             txt_clip = TextClip(
                 word,
+                font='DejaVu-Sans-Bold',
                 fontsize=config.SUBTITLE_HIGHLIGHT_SIZE,
                 color=config.SUBTITLE_HIGHLIGHT_COLOR,
-                font=config.SUBTITLE_FONT,
                 stroke_color=config.SUBTITLE_OUTLINE_COLOR,
                 stroke_width=config.SUBTITLE_OUTLINE_WIDTH,
                 method='caption',

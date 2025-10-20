@@ -10,8 +10,12 @@ services:
       - ./output:/app/output
       - ./cache:/app/cache
       - ./logs:/app/logs
+      - whisper-cache:/root/.cache/huggingface
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
     mem_limit: 8g
     cpus: 4
+
+volumes:
+  whisper-cache:
