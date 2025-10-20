@@ -22,6 +22,10 @@ RUN apt-get update && apt-get install -y \
     make \
     && rm -rf /var/lib/apt/lists/*
 
+# Fix ImageMagick policy for text rendering
+RUN sed -i 's/rights="none" pattern="@\*"/rights="read|write" pattern="@*"/' /etc/ImageMagick-6/policy.xml || \
+    sed -i 's/rights="none" pattern="@\*"/rights="read|write" pattern="@*"/' /etc/ImageMagick*/policy.xml || true
+
 WORKDIR /app
 
 # Copy requirements and install Python dependencies
@@ -30,9 +34,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/
-
-# Pre-download Whisper model to cache
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('medium', device='cpu', compute_type='int8', download_root='/root/.cache/huggingface')"
 
 # Create necessary directories
 RUN mkdir -p /app/output /app/cache /app/logs

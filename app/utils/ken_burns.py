@@ -4,7 +4,8 @@ Ken Burns effect implementation - Enhanced for visibility
 import sys
 from pathlib import Path
 import random
-from typing import Dict, Tuple
+from typing import Dict
+import numpy as np
 
 # Add app directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -76,53 +77,46 @@ def apply_ken_burns(clip, params: Dict, duration: float):
         progress = t / duration if duration > 0 else 0
         frame = get_frame(t)
         
-        # Calculate zoom
-        if 'zoom' in direction or direction.startswith('pan'):
-            if direction == "zoom_out":
-                zoom = zoom_start - (zoom_start - zoom_end) * progress
-            else:
-                zoom = zoom_start + (zoom_end - zoom_start) * progress
-            
-            new_w = int(w * zoom)
-            new_h = int(h * zoom)
-            
-            from PIL import Image
-            img = Image.fromarray(frame)
-            img = img.resize((new_w, new_h), Image.LANCZOS)
-            frame = np.array(img)
+        # Calculate current zoom
+        zoom = zoom_start + (zoom_end - zoom_start) * progress
+        
+        # Resize frame
+        from PIL import Image
+        img = Image.fromarray(frame)
+        new_w = int(w * zoom)
+        new_h = int(h * zoom)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+        zoomed = np.array(img)
         
         # Calculate pan offset
         x_offset = 0
         y_offset = 0
         
         if direction == "pan_left":
-            x_offset = -int(frame.shape[1] * pan_x * progress)
+            max_offset = zoomed.shape[1] - w
+            x_offset = int(max_offset * pan_x * progress)
         elif direction == "pan_right":
-            x_offset = int(frame.shape[1] * pan_x * progress)
+            max_offset = zoomed.shape[1] - w
+            x_offset = int(max_offset * (1 - pan_x * progress))
         elif direction == "pan_up":
-            y_offset = -int(frame.shape[0] * pan_y * progress)
+            max_offset = zoomed.shape[0] - h
+            y_offset = int(max_offset * pan_y * progress)
         elif direction == "pan_down":
-            y_offset = int(frame.shape[0] * pan_y * progress)
+            max_offset = zoomed.shape[0] - h
+            y_offset = int(max_offset * (1 - pan_y * progress))
+        else:
+            # Center crop for zoom only
+            x_offset = (zoomed.shape[1] - w) // 2
+            y_offset = (zoomed.shape[0] - h) // 2
         
-        # Crop/pad to original size
-        fh, fw = frame.shape[:2]
-        result = np.zeros((h, w, 3), dtype=np.uint8)
+        # Ensure offsets are within bounds
+        x_offset = max(0, min(x_offset, zoomed.shape[1] - w))
+        y_offset = max(0, min(y_offset, zoomed.shape[0] - h))
         
-        src_x = max(0, x_offset)
-        src_y = max(0, y_offset)
-        dst_x = max(0, -x_offset)
-        dst_y = max(0, -y_offset)
-        
-        copy_w = min(w - dst_x, fw - src_x)
-        copy_h = min(h - dst_y, fh - src_y)
-        
-        if copy_w > 0 and copy_h > 0:
-            result[dst_y:dst_y+copy_h, dst_x:dst_x+copy_w] = frame[src_y:src_y+copy_h, src_x:src_x+copy_w]
+        # Crop to original size
+        result = zoomed[y_offset:y_offset+h, x_offset:x_offset+w]
         
         return result
     
-    from moviepy.editor import VideoClip
-    import numpy as np
-    
-    logger.info(f"Applied effect: {direction}")
+    logger.info(f"Applied pan: {direction}")
     return clip.fl(effect)
