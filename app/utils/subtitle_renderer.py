@@ -10,10 +10,9 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-
 def create_text_image(text: str, video_size: tuple, fontsize: int, color: str, 
-                      stroke_color: str, stroke_width: int) -> np.ndarray:
-    """Create text image using PIL"""
+                      stroke_color: str, stroke_width: int) -> tuple:
+    """Create text image with mask using PIL"""
     width, height = video_size
     img = Image.new('RGBA', (width, 200), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -36,12 +35,10 @@ def create_text_image(text: str, video_size: tuple, fontsize: int, color: str,
     draw.text((x, y), text, font=font, fill=text_rgb + (255,), 
               stroke_width=stroke_width, stroke_fill=stroke_rgb + (255,))
     
-    # Convert RGBA to RGB with alpha compositing
-    rgb_img = Image.new('RGB', (width, 200), (0, 0, 0))
-    rgb_img.paste(img, mask=img.split()[3])
+    rgb = np.array(img.convert('RGB'))
+    alpha = np.array(img.split()[-1])
     
-    return np.array(rgb_img)
-
+    return rgb, alpha
 
 def render_subtitles(video_clip, words: List[Dict], video_size: tuple) -> CompositeVideoClip:
     """Render word-by-word subtitles"""

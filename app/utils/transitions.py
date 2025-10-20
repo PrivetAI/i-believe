@@ -51,22 +51,16 @@ def apply_transitions(clips: List[VideoClip]) -> VideoClip:
     for i in range(len(clips)):
         clip = clips[i]
         
-        # Add transition before clip (except first)
         if i > 0:
             transition_type = random.choice(config.TRANSITION_TYPES)
             logger.debug(f"Transition {i}: {transition_type}")
             
-            # For simplicity in MVP, use crossfade for all
-            # More complex transitions can be added later
-            if transition_type in ["crossfade", "dissolve"]:
-                # Overlap handled by concatenate with negative padding
-                clip = clip.crossfadein(config.TRANSITION_DURATION)
-                result_clips[-1] = result_clips[-1].crossfadeout(config.TRANSITION_DURATION)
+            clip = clip.crossfadein(config.TRANSITION_DURATION)
+            result_clips[-1] = result_clips[-1].crossfadeout(config.TRANSITION_DURATION)
         
         result_clips.append(clip)
     
-    # Concatenate all clips with crossfade
-    final_clip = concatenate_videoclips(result_clips, method="compose", padding=-config.TRANSITION_DURATION)
+    final_clip = concatenate_videoclips(result_clips, padding=-config.TRANSITION_DURATION, method="compose")
     
     logger.info("Transitions applied successfully")
     return final_clip

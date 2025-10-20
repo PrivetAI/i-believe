@@ -60,8 +60,6 @@ def apply_ken_burns(clip, params: Dict, duration: float):
     Returns:
         Transformed clip with Ken Burns effect
     """
-    from moviepy.editor import VideoClip
-    
     direction = params['direction']
     zoom_start = params['zoom_start']
     zoom_end = params['zoom_end']
@@ -74,50 +72,57 @@ def apply_ken_burns(clip, params: Dict, duration: float):
     logger.info(f"Zoom: {zoom_start:.2f} -> {zoom_end:.2f}")
     logger.debug(f"Clip size: {w}x{h}, Duration: {duration}s")
     
-    # Apply zoom effect
-    if 'zoom' in direction:
-        if direction == "zoom_in":
-            def resize_func(t):
-                progress = t / duration if duration > 0 else 0
-                zoom = zoom_start + (zoom_end - zoom_start) * progress
-                return zoom
-        else:  # zoom_out
-            def resize_func(t):
-                progress = t / duration if duration > 0 else 0
+    def effect(get_frame, t):
+        progress = t / duration if duration > 0 else 0
+        frame = get_frame(t)
+        
+        # Calculate zoom
+        if 'zoom' in direction or direction.startswith('pan'):
+            if direction == "zoom_out":
                 zoom = zoom_start - (zoom_start - zoom_end) * progress
-                return zoom
+            else:
+                zoom = zoom_start + (zoom_end - zoom_start) * progress
+            
+            new_w = int(w * zoom)
+            new_h = int(h * zoom)
+            
+            from PIL import Image
+            img = Image.fromarray(frame)
+            img = img.resize((new_w, new_h), Image.LANCZOS)
+            frame = np.array(img)
         
-        clip = clip.resize(resize_func)
-        logger.info(f"Applied zoom from {zoom_start:.2f}x to {zoom_end:.2f}x")
-    
-    # Apply pan effect
-    if 'pan' in direction:
+        # Calculate pan offset
+        x_offset = 0
+        y_offset = 0
+        
         if direction == "pan_left":
-            def pos_func(t):
-                progress = t / duration if duration > 0 else 0
-                x_offset = -int(w * pan_x * progress)
-                return (x_offset, 'center')
+            x_offset = -int(frame.shape[1] * pan_x * progress)
         elif direction == "pan_right":
-            def pos_func(t):
-                progress = t / duration if duration > 0 else 0
-                x_offset = int(w * pan_x * progress)
-                return (x_offset, 'center')
+            x_offset = int(frame.shape[1] * pan_x * progress)
         elif direction == "pan_up":
-            def pos_func(t):
-                progress = t / duration if duration > 0 else 0
-                y_offset = -int(h * pan_y * progress)
-                return ('center', y_offset)
+            y_offset = -int(frame.shape[0] * pan_y * progress)
         elif direction == "pan_down":
-            def pos_func(t):
-                progress = t / duration if duration > 0 else 0
-                y_offset = int(h * pan_y * progress)
-                return ('center', y_offset)
-        else:
-            pos_func = lambda t: ('center', 'center')
+            y_offset = int(frame.shape[0] * pan_y * progress)
         
-        clip = clip.set_position(pos_func)
-        logger.info(f"Applied pan: {direction}")
-    else:
-        clip = clip.set_position(('center', 'center'))
+        # Crop/pad to original size
+        fh, fw = frame.shape[:2]
+        result = np.zeros((h, w, 3), dtype=np.uint8)
+        
+        src_x = max(0, x_offset)
+        src_y = max(0, y_offset)
+        dst_x = max(0, -x_offset)
+        dst_y = max(0, -y_offset)
+        
+        copy_w = min(w - dst_x, fw - src_x)
+        copy_h = min(h - dst_y, fh - src_y)
+        
+        if copy_w > 0 and copy_h > 0:
+            result[dst_y:dst_y+copy_h, dst_x:dst_x+copy_w] = frame[src_y:src_y+copy_h, src_x:src_x+copy_w]
+        
+        return result
     
-    return clip
+    from moviepy.editor import VideoClip
+    import numpy as np
+    
+    logger.info(f"Applied effect: {direction}")
+    return clip.fl(effect)
