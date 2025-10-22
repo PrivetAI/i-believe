@@ -1,5 +1,5 @@
 """
-Subtitle rendering with word-by-word live caption style using PIL
+TikTok-style subtitle rendering - proper implementation
 """
 from typing import List, Dict
 from moviepy.editor import CompositeVideoClip, TextClip
@@ -8,91 +8,106 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-def group_words_by_time(words: List[Dict], max_words: int = 3, max_duration: float = 2.0) -> List[Dict]:
-    """Group words into chunks for display"""
+def group_words_strict(words: List[Dict], min_words: int = 2, max_words: int = 4) -> List[Dict]:
+    """Group words strictly 2-4 per chunk"""
     if not words:
         return []
     
     groups = []
-    current_group = {
-        'words': [words[0]['word']],
-        'start': words[0]['start'],
-        'end': words[0]['end']
-    }
+    i = 0
     
-    for i in range(1, len(words)):
-        word = words[i]
-        duration = word['end'] - current_group['start']
+    while i < len(words):
+        chunk_size = min(max_words, len(words) - i)
+        if chunk_size < min_words and i > 0:
+            for w in words[i:]:
+                groups[-1]['words'].append(w)
+            break
         
-        # Start new group if too many words or too long
-        if len(current_group['words']) >= max_words or duration > max_duration:
-            groups.append(current_group)
-            current_group = {
-                'words': [word['word']],
-                'start': word['start'],
-                'end': word['end']
-            }
-        else:
-            # Add to current group
-            current_group['words'].append(word['word'])
-            current_group['end'] = word['end']
-    
-    # Add last group
-    if current_group['words']:
-        groups.append(current_group)
+        chunk = words[i:i+chunk_size]
+        groups.append({
+            'words': chunk,
+            'start': chunk[0]['start'],
+            'end': chunk[-1]['end']
+        })
+        i += chunk_size
     
     return groups
 
 def render_subtitles(video_clip, words: List[Dict], video_size: tuple) -> CompositeVideoClip:
-    """Render grouped subtitles with fade-in effect"""
+    """
+    Render TikTok-style subtitles: 2-4 words, center, current word yellow
+    Optimized for speed: cache measurements, minimize clip creation
+    """
     if not words:
         logger.warning("No words provided for subtitles")
         return video_clip
     
-    # Group words
-    word_groups = group_words_by_time(words, max_words=3, max_duration=2.0)
-    logger.info(f"Rendering {len(word_groups)} subtitle groups from {len(words)} words")
+    word_groups = group_words_strict(words)
+    logger.info(f"Rendering {len(word_groups)} subtitle groups (2-4 words each)")
     
-    subtitle_clips = []
+    all_subtitle_clips = []
     width, height = video_size
-    y_position = int(height * config.SUBTITLE_POSITION[1])
-    fade_duration = 0.2
+    center_y = height // 2
+    
+    # Pre-cache text measurements for all unique words
+    word_size_cache = {}
     
     for group in word_groups:
-        text = ' '.join(group['words'])
-        start = group['start']
-        duration = group['end'] - group['start']
+        group_words = group['words']
         
-        try:
-            # Create text clip
-            txt_clip = TextClip(
-                text,
-                fontsize=config.SUBTITLE_FONT_SIZE,
-                color=config.SUBTITLE_HIGHLIGHT_COLOR,
-                font='DejaVu-Sans-Bold',
-                stroke_color=config.SUBTITLE_OUTLINE_COLOR,
-                stroke_width=config.SUBTITLE_OUTLINE_WIDTH,
-                method='caption',
-                size=(width * 0.9, None),
-                bg_color='transparent'
-            )
+        # Measure words (cached)
+        word_sizes = []
+        for word_data in group_words:
+            word = word_data['word']
+            if word not in word_size_cache:
+                measure_clip = TextClip(
+                    word,
+                    fontsize=config.SUBTITLE_FONT_SIZE,
+                    color='white',
+                    font=config.SUBTITLE_FONT
+                )
+                word_size_cache[word] = measure_clip.size
+                measure_clip.close()
+            word_sizes.append(word_size_cache[word])
+        
+        # Calculate total width with spaces
+        space_width = word_sizes[0][0] // 4 if word_sizes else 10
+        total_width = sum(w for w, h in word_sizes) + space_width * (len(word_sizes) - 1)
+        start_x = (width - total_width) // 2
+        
+        current_x = start_x
+        word_height = word_sizes[0][1] if word_sizes else config.SUBTITLE_FONT_SIZE
+        
+        for i, word_data in enumerate(group_words):
+            word = word_data['word']
+            word_start = word_data['start']
+            word_duration = word_data['end'] - word_data['start']
+            word_width = word_sizes[i][0]
             
-            # Set duration and apply fade
-            # txt_clip = txt_clip.set_duration(duration)
-            # if duration > fade_duration:
-                # txt_clip = txt_clip.fadein(fade_duration)
+            # Reuse common parameters
+            common_params = {
+                'fontsize': config.SUBTITLE_FONT_SIZE,
+                'font': config.SUBTITLE_FONT,
+                'stroke_color': config.SUBTITLE_OUTLINE_COLOR,
+                'stroke_width': config.SUBTITLE_OUTLINE_WIDTH
+            }
             
-            # Position and timing
-            txt_clip = txt_clip.set_position(('center', y_position)).set_start(start)
-            subtitle_clips.append(txt_clip)
+            # White base
+            white_clip = TextClip(
+                word,
+                color='white',
+                **common_params
+            ).set_position((current_x, center_y - word_height//2)).set_start(group['start']).set_duration(group['end'] - group['start'])
             
-        except Exception as e:
-            logger.error(f"Failed to create subtitle for text '{text}': {e}")
-            continue
+            # Yellow highlight
+            yellow_clip = TextClip(
+                word,
+                color='yellow',
+                **common_params
+            ).set_position((current_x, center_y - word_height//2)).set_start(word_start).set_duration(word_duration)
+            
+            all_subtitle_clips.extend([white_clip, yellow_clip])
+            current_x += word_width + space_width
     
-    logger.info(f"Created {len(subtitle_clips)} subtitle clips")
-    
-    if not subtitle_clips:
-        return video_clip
-    
-    return CompositeVideoClip([video_clip] + subtitle_clips)
+    logger.info(f"Created {len(all_subtitle_clips)} subtitle clips")
+    return CompositeVideoClip([video_clip] + all_subtitle_clips) if all_subtitle_clips else video_clip

@@ -15,7 +15,7 @@ services:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
     mem_limit: 8g
-    cpus: 4
+    cpus: 6
 
 volumes:
   whisper-cache:

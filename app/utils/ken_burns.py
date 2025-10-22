@@ -1,5 +1,5 @@
 """
-Ken Burns effect implementation - Enhanced for visibility
+Ken Burns effect implementation
 """
 import sys
 from pathlib import Path
@@ -7,7 +7,6 @@ import random
 from typing import Dict
 import numpy as np
 
-# Add app directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import config
@@ -17,25 +16,21 @@ logger = get_logger(__name__)
 
 
 def generate_ken_burns_params() -> Dict:
-    """
-    Generate random Ken Burns effect parameters
-    
-    Returns:
-        Dictionary with 'direction', 'zoom_start', 'zoom_end', 'pan_x', 'pan_y'
-    """
+    """Generate Ken Burns parameters from config ranges"""
     direction = random.choice(config.KEN_BURNS_DIRECTIONS)
     
-    # More dramatic zoom range
-    zoom_start = random.uniform(1.0, 1.2)
-    zoom_end = random.uniform(1.3, 1.5)
+    zoom_start = random.uniform(*config.KEN_BURNS_ZOOM_RANGE)
+    zoom_end = random.uniform(*config.KEN_BURNS_ZOOM_RANGE)
     
-    # Ensure zoom in/out is more noticeable
+    # Ensure zoom difference is visible
+    if abs(zoom_end - zoom_start) < 0.1:
+        zoom_end = zoom_start + 0.2
+    
     if direction == "zoom_out":
-        zoom_start, zoom_end = zoom_end, zoom_start
+        zoom_start, zoom_end = max(zoom_start, zoom_end), min(zoom_start, zoom_end)
     
-    # More dramatic pan
-    pan_x = random.uniform(0.1, 0.2)
-    pan_y = random.uniform(0.1, 0.2)
+    pan_x = random.uniform(*config.KEN_BURNS_PAN_RANGE)
+    pan_y = random.uniform(*config.KEN_BURNS_PAN_RANGE)
     
     params = {
         'direction': direction,
@@ -45,21 +40,14 @@ def generate_ken_burns_params() -> Dict:
         'pan_y': pan_y
     }
     
-    logger.info(f"Generated Ken Burns params: {params}")
+    logger.info(f"Ken Burns params: {params}")
     return params
 
 
 def apply_ken_burns(clip, params: Dict, duration: float):
     """
-    Apply Ken Burns effect to a clip with enhanced visibility
-    
-    Args:
-        clip: MoviePy VideoClip or ImageClip
-        params: Ken Burns parameters from generate_ken_burns_params()
-        duration: Effect duration in seconds
-        
-    Returns:
-        Transformed clip with Ken Burns effect
+    Apply Ken Burns effect with parameters from config
+    Optimized: pre-calculate values, minimize operations per frame
     """
     direction = params['direction']
     zoom_start = params['zoom_start']
@@ -69,18 +57,32 @@ def apply_ken_burns(clip, params: Dict, duration: float):
     
     w, h = clip.size
     
-    logger.info(f"Applying Ken Burns effect: {direction}")
-    logger.info(f"Zoom: {zoom_start:.2f} -> {zoom_end:.2f}")
-    logger.debug(f"Clip size: {w}x{h}, Duration: {duration}s")
+    logger.info(f"Applying Ken Burns: {direction}, zoom {zoom_start:.2f}->{zoom_end:.2f}")
+    
+    # Pre-calculate constants
+    zoom_diff = zoom_end - zoom_start
+    
+    # Determine pan offsets based on direction
+    pan_x_factor = 0
+    pan_y_factor = 0
+    
+    if direction == "pan_left":
+        pan_x_factor = pan_x
+    elif direction == "pan_right":
+        pan_x_factor = -pan_x
+    elif direction == "pan_up":
+        pan_y_factor = pan_y
+    elif direction == "pan_down":
+        pan_y_factor = -pan_y
     
     def effect(get_frame, t):
-        progress = t / duration if duration > 0 else 0
+        progress = min(t / duration, 1.0) if duration > 0 else 0
         frame = get_frame(t)
         
-        # Calculate current zoom
-        zoom = zoom_start + (zoom_end - zoom_start) * progress
+        # Calculate zoom
+        zoom = zoom_start + zoom_diff * progress
         
-        # Resize frame
+        # Resize
         from PIL import Image
         img = Image.fromarray(frame)
         new_w = int(w * zoom)
@@ -88,35 +90,24 @@ def apply_ken_burns(clip, params: Dict, duration: float):
         img = img.resize((new_w, new_h), Image.LANCZOS)
         zoomed = np.array(img)
         
-        # Calculate pan offset
-        x_offset = 0
-        y_offset = 0
-        
-        if direction == "pan_left":
-            max_offset = zoomed.shape[1] - w
-            x_offset = int(max_offset * pan_x * progress)
-        elif direction == "pan_right":
-            max_offset = zoomed.shape[1] - w
-            x_offset = int(max_offset * (1 - pan_x * progress))
-        elif direction == "pan_up":
-            max_offset = zoomed.shape[0] - h
-            y_offset = int(max_offset * pan_y * progress)
-        elif direction == "pan_down":
-            max_offset = zoomed.shape[0] - h
-            y_offset = int(max_offset * (1 - pan_y * progress))
+        # Calculate offsets
+        if direction in ["pan_left", "pan_right"]:
+            max_x = max(0, zoomed.shape[1] - w)
+            x_offset = int(max_x * (0.5 + pan_x_factor * progress))
+            y_offset = (zoomed.shape[0] - h) // 2
+        elif direction in ["pan_up", "pan_down"]:
+            x_offset = (zoomed.shape[1] - w) // 2
+            max_y = max(0, zoomed.shape[0] - h)
+            y_offset = int(max_y * (0.5 + pan_y_factor * progress))
         else:
-            # Center crop for zoom only
             x_offset = (zoomed.shape[1] - w) // 2
             y_offset = (zoomed.shape[0] - h) // 2
         
-        # Ensure offsets are within bounds
+        # Clamp offsets
         x_offset = max(0, min(x_offset, zoomed.shape[1] - w))
         y_offset = max(0, min(y_offset, zoomed.shape[0] - h))
         
-        # Crop to original size
-        result = zoomed[y_offset:y_offset+h, x_offset:x_offset+w]
-        
-        return result
+        # Crop
+        return zoomed[y_offset:y_offset+h, x_offset:x_offset+w]
     
-    logger.info(f"Applied pan: {direction}")
     return clip.fl(effect)

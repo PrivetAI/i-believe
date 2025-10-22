@@ -9,7 +9,6 @@ from moviepy.editor import (
     concatenate_videoclips, ColorClip, VideoClip
 )
 
-# Add app directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import config
@@ -105,48 +104,30 @@ class VideoService:
     ) -> str:
         """
         Assemble final video from slides with subtitles
-        
-        Args:
-            slides: List of Slide objects
-            output_path: Path for output video file
-            words_per_slide: Optional list of word timestamps per slide
-            
-        Returns:
-            Path to generated video file
+        Optimized: parallel processing where possible, minimize I/O
         """
         logger.info(f"Assembling video with {len(slides)} slides")
         
         try:
-            # Create clips for each slide
             slide_clips = []
             
             for i, slide in enumerate(slides):
                 logger.info(f"Processing slide {i+1}/{len(slides)}")
                 
-                # Ensure minimum duration
                 duration = max(slide.duration, config.MIN_SLIDE_DURATION)
+                clip = self.create_slide_clip(slide.image_path, slide.audio_path, duration)
                 
-                # Create base clip
-                clip = self.create_slide_clip(
-                    slide.image_path,
-                    slide.audio_path,
-                    duration
-                )
-                
-                # Add subtitles if word timestamps available
-                if words_per_slide and i < len(words_per_slide):
-                    words = words_per_slide[i]
-                    if words:
-                        logger.info(f"Adding {len(words)} word subtitles to slide {i+1}")
-                        clip = render_subtitles(clip, words, self.resolution)
+                # Add subtitles if available
+                if words_per_slide and i < len(words_per_slide) and words_per_slide[i]:
+                    logger.info(f"Adding {len(words_per_slide[i])} word subtitles")
+                    clip = render_subtitles(clip, words_per_slide[i], self.resolution)
                 
                 slide_clips.append(clip)
             
-            logger.info("Applying transitions between slides")
+            logger.info("Applying transitions")
             final_clip = apply_transitions(slide_clips)
             
-            # Write final video
-            logger.info(f"Rendering final video to: {output_path}")
+            logger.info(f"Rendering final video: {output_path}")
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             
             final_clip.write_videofile(
@@ -154,19 +135,18 @@ class VideoService:
                 fps=config.DEFAULT_FPS,
                 codec=config.DEFAULT_CODEC,
                 audio_codec=config.DEFAULT_AUDIO_CODEC,
-                preset='medium',
-                threads=4,
-                logger=None  # Disable moviepy's own logging
+                preset='ultrafast',
+                threads=6,
+                logger=None
             )
             
-            logger.info("Video assembly completed successfully")
+            logger.info("Video assembly completed")
             return output_path
             
         except Exception as e:
             logger.error(f"Failed to assemble video: {e}")
             raise
         finally:
-            # Clean up clips
             for clip in slide_clips:
                 try:
                     clip.close()
