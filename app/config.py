@@ -22,10 +22,12 @@ TRANSITION_DURATION = 0.5
 TRANSITION_TYPES = ["fade", "crossfade", "wipe_left", "wipe_right", "wipe_up", "wipe_down", "dissolve"]
 
 # Subtitle settings - TikTok style
-SUBTITLE_FONT = "DejaVu-Sans-Bold"
-SUBTITLE_FONT_SIZE = 60
+# Subtitle settings - TikTok style
+SUBTITLE_FONT = "Montserrat-Bold"
+SUBTITLE_FONT_SIZE = 70
 SUBTITLE_OUTLINE_COLOR = "black"
-SUBTITLE_OUTLINE_WIDTH = 4
+SUBTITLE_OUTLINE_WIDTH = 5
+SUBTITLE_LINE_SPACING = 0.4  # 40% от высоты строки
 
 # Attention effects settings
 EFFECTS_PROBABILITY = 0.3
