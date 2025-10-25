@@ -5,3 +5,4 @@ Pillow==9.5.0
 numpy==1.26.0
 pydub==0.25.1
 scipy==1.11.4
+moviepy==1.0.3
