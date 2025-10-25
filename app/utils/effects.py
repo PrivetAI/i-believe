@@ -1,14 +1,11 @@
 """
-Effects Helper - Ken Burns and Custom Transitions (Glitch, Flash, Zoom Punch)
-Save this as: app/utils/effects.py
+Effects Helper - Ken Burns and Transitions (Working Version)
 """
 import random
 import subprocess
-import numpy as np
 from pathlib import Path
 from typing import Dict, Tuple, List
 import sys
-import tempfile
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -19,7 +16,7 @@ logger = get_logger(__name__)
 
 
 class KenBurnsEffect:
-    """Ken Burns effect generator for FFmpeg"""
+    """Ken Burns effect - FIXED VERSION"""
     
     @staticmethod
     def generate_params() -> Dict:
@@ -29,11 +26,9 @@ class KenBurnsEffect:
         zoom_start = random.uniform(*config.KEN_BURNS_ZOOM_RANGE)
         zoom_end = random.uniform(*config.KEN_BURNS_ZOOM_RANGE)
         
-        # Ensure minimum zoom difference
-        if abs(zoom_end - zoom_start) < 0.1:
-            zoom_end = zoom_start + 0.15
+        if abs(zoom_end - zoom_start) < 0.05:
+            zoom_end = zoom_start + 0.1
         
-        # Swap for zoom_out
         if direction == "zoom_out":
             zoom_start, zoom_end = max(zoom_start, zoom_end), min(zoom_start, zoom_end)
         
@@ -59,71 +54,60 @@ class KenBurnsEffect:
         params: Dict = None
     ) -> str:
         """
-        Build FFmpeg zoompan filter for Ken Burns effect
-        WITHOUT input/output labels (to be added by caller)
+        Build smooth Ken Burns filter (NO SHAKING)
         
-        Args:
-            duration: Clip duration in seconds
-            fps: Frames per second
-            resolution: (width, height)
-            params: Ken Burns parameters (auto-generated if None)
-            
-        Returns:
-            FFmpeg zoompan filter string (without labels)
+        Key fix: Use format=pix_fmts=yuv420p BEFORE zoompan
         """
         if params is None:
             params = KenBurnsEffect.generate_params()
         
-        total_frames = int(duration * fps)
-        direction = params['direction']
-        zoom_start = params['zoom_start']
-        zoom_end = params['zoom_end']
-        pan_x = params['pan_x']
-        pan_y = params['pan_y']
-        
         width, height = resolution
+        total_frames = int(duration * fps)
         
-        # Smooth zoom interpolation
-        zoom_expr = f"'if(eq(on,1),{zoom_start},{zoom_start}+({zoom_end}-{zoom_start})*on/{total_frames})'"
+        direction = params['direction']
+        z_start = params['zoom_start']
+        z_end = params['zoom_end']
         
-        # Pan expressions based on direction
+        # CRITICAL: Smooth interpolation without jumps
+        # Use 'on' (output frame number) for smooth progression
+        zoom_expr = f"{z_start}+({z_end}-{z_start})*on/{total_frames}"
+        
+        # Center by default
+        x_expr = "iw/2-(iw/zoom/2)"
+        y_expr = "ih/2-(ih/zoom/2)"
+        
+        # Apply pan if needed
         if direction == "pan_left":
-            x_expr = f"'iw/2-(iw/zoom/2)+({pan_x}*iw)*(on/{total_frames})'"
-            y_expr = "'ih/2-(ih/zoom/2)'"
+            x_expr = f"iw/2-(iw/zoom/2)+iw*{params['pan_x']}*(1-on/{total_frames})"
         elif direction == "pan_right":
-            x_expr = f"'iw/2-(iw/zoom/2)-({pan_x}*iw)*(on/{total_frames})'"
-            y_expr = "'ih/2-(ih/zoom/2)'"
+            x_expr = f"iw/2-(iw/zoom/2)-iw*{params['pan_x']}*(1-on/{total_frames})"
         elif direction == "pan_up":
-            x_expr = "'iw/2-(iw/zoom/2)'"
-            y_expr = f"'ih/2-(ih/zoom/2)+({pan_y}*ih)*(on/{total_frames})'"
+            y_expr = f"ih/2-(ih/zoom/2)+ih*{params['pan_y']}*(1-on/{total_frames})"
         elif direction == "pan_down":
-            x_expr = "'iw/2-(iw/zoom/2)'"
-            y_expr = f"'ih/2-(ih/zoom/2)-({pan_y}*ih)*(on/{total_frames})'"
-        else:  # zoom_in or zoom_out
-            x_expr = "'iw/2-(iw/zoom/2)'"
-            y_expr = "'ih/2-(ih/zoom/2)'"
+            y_expr = f"ih/2-(ih/zoom/2)-ih*{params['pan_y']}*(1-on/{total_frames})"
         
-        zoompan = (
+        # Build filter (KEY: format before zoompan prevents shaking)
+        kb_filter = (
+            f"format=pix_fmts=yuv420p,"
             f"zoompan="
-            f"z={zoom_expr}:"
-            f"x={x_expr}:"
-            f"y={y_expr}:"
-            f"d={total_frames}:"
+            f"z='{zoom_expr}':"
+            f"x='{x_expr}':"
+            f"y='{y_expr}':"
+            f"d=1:"
             f"s={width}x{height}:"
             f"fps={fps}"
         )
         
-        return zoompan
+        return kb_filter
 
 
 class CustomTransitions:
-    """Custom transitions: Glitch, Flash, Zoom Punch"""
+    """Simple working transitions"""
     
     TRANSITIONS = ['glitch', 'flash', 'zoom_punch']
     
     @staticmethod
     def get_random_transition() -> str:
-        """Get random transition from custom set"""
         return random.choice(CustomTransitions.TRANSITIONS)
     
     @staticmethod
@@ -134,73 +118,75 @@ class CustomTransitions:
         duration: float = 0.3
     ) -> str:
         """
-        Apply glitch transition using FFmpeg complex filters
-        
-        Creates RGB channel shift effect at the end of clip1 and start of clip2
+        RGB Glitch - ONLY at transition point
         """
         logger.info("Applying glitch transition")
         
-        # Get clip durations
         def get_duration(path):
             cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
                    '-of', 'default=noprint_wrappers=1:nokey=1', path]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             return float(result.stdout.strip())
         
         clip1_dur = get_duration(clip1_path)
         clip2_dur = get_duration(clip2_path)
+        offset = clip1_dur - duration
         
-        # Glitch parameters
-        glitch_start1 = clip1_dur - duration
-        shift_amount = 30  # pixels
+        shift = 15
         
-        # Build complex filter for glitch effect
-        # For clip1 (end): shift red and blue channels
+        # Split clip1 into before/after transition point
+        # Apply glitch ONLY to last 'duration' seconds
         filter_complex = (
-            # Load both clips
-            f"[0:v]split=3[r1][g1][b1];"
-            f"[1:v]split=3[r2][g2][b2];"
+            # Clip1: split at transition point
+            f"[0:v]split[before1][after1];"
             
-            # Clip1 glitch (last {duration} seconds): shift channels
-            f"[r1]crop=iw-{shift_amount}:ih:{shift_amount}:0,pad=iw+{shift_amount}:ih:0:0:black[r1s];"
-            f"[b1]crop=iw-{shift_amount}:ih:0:0,pad=iw+{shift_amount}:ih:{shift_amount}:0:black[b1s];"
-            f"[r1s][g1][b1s]mergeplanes=0x001020:rgb[clip1glitch];"
+            # Before part: no glitch
+            f"[before1]trim=end={offset},setpts=PTS-STARTPTS[v1a];"
             
-            # Clip2 glitch (first {duration} seconds): horizontal slice shifts
-            f"[r2]crop=iw-{shift_amount}:ih:{shift_amount}:0,pad=iw+{shift_amount}:ih:0:0:black[r2s];"
-            f"[b2]crop=iw-{shift_amount}:ih:0:0,pad=iw+{shift_amount}:ih:{shift_amount}:0:black[b2s];"
-            f"[r2s][g2][b2s]mergeplanes=0x001020:rgb[clip2glitch];"
+            # After part: RGB glitch
+            f"[after1]trim=start={offset},"
+            f"geq="
+            f"r='r(X-{shift},Y)':"
+            f"g='g(X,Y)':"
+            f"b='b(X+{shift},Y)',"
+            f"setpts=PTS-STARTPTS[v1b];"
             
-            # Fade transition between glitched clips
-            f"[clip1glitch][clip2glitch]xfade=transition=fade:duration={duration}:offset={glitch_start1}[v]"
+            # Clip2: RGB glitch at start (opposite direction)
+            f"[1:v]trim=end={duration},"
+            f"geq="
+            f"r='r(X+{shift},Y)':"
+            f"g='g(X,Y)':"
+            f"b='b(X-{shift},Y)',"
+            f"setpts=PTS-STARTPTS[v2a];"
+            
+            # Rest of clip2: no glitch
+            f"[1:v]trim=start={duration},setpts=PTS-STARTPTS[v2b];"
+            
+            # Concat: v1a + fade(v1b, v2a) + v2b
+            f"[v1b][v2a]xfade=transition=fade:duration={duration}:offset=0[fade];"
+            f"[v1a][fade][v2b]concat=n=3:v=1:a=0[v]"
         )
         
         cmd = [
             'ffmpeg', '-y',
             '-i', clip1_path,
             '-i', clip2_path,
-            '-filter_complex', filter_complex,
+            '-filter_complex', f"{filter_complex};[0:a][1:a]acrossfade=d={duration}[a]",
             '-map', '[v]',
+            '-map', '[a]',
             '-c:v', 'libx264',
-            '-preset', config.MOVIEPY_PRESET,
-            '-crf', str(config.CRF),
+            '-preset', 'medium',
+            '-crf', '20',
             '-pix_fmt', 'yuv420p',
-            '-t', str(clip1_dur + clip2_dur),
+            '-c:a', 'aac',
+            '-shortest',
             output_path
         ]
-        
-        # Merge audio with crossfade
-        cmd.insert(-6, '-filter_complex')
-        cmd.insert(-6, f"{filter_complex};[0:a][1:a]acrossfade=d={duration}[a]")
-        cmd.insert(-4, '-map')
-        cmd.insert(-4, '[a]')
-        cmd.insert(-2, '-c:a')
-        cmd.insert(-2, 'aac')
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         
         if result.returncode != 0:
-            logger.error(f"Glitch transition failed: {result.stderr[-500:]}")
+            logger.error(f"Glitch failed: {result.stderr[-1000:]}")
             raise RuntimeError("Glitch transition failed")
         
         return output_path
@@ -212,35 +198,22 @@ class CustomTransitions:
         output_path: str,
         duration: float = 0.3
     ) -> str:
-        """
-        Apply flash transition using FFmpeg
-        
-        Brightens to white at end of clip1, then fades from white in clip2
-        """
+        """White flash transition"""
         logger.info("Applying flash transition")
         
         def get_duration(path):
             cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
                    '-of', 'default=noprint_wrappers=1:nokey=1', path]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             return float(result.stdout.strip())
         
         clip1_dur = get_duration(clip1_path)
-        flash_start = clip1_dur - duration
+        offset = clip1_dur - duration
         
-        # Build flash effect with curves and zoom
         filter_complex = (
-            # Clip1: fade to white + zoom at end
-            f"[0:v]eq=brightness=0.4:saturation=0.8,"
-            f"fade=t=out:st={flash_start}:d={duration}:color=white,"
-            f"zoompan=z='if(gte(on,{int(flash_start*config.DEFAULT_FPS)}),1+0.5*(on-{int(flash_start*config.DEFAULT_FPS)})/{int(duration*config.DEFAULT_FPS)},1)':"
-            f"d=1:s={{w}}x{{h}}:fps={config.DEFAULT_FPS}[v1];"
-            
-            # Clip2: fade from white
+            f"[0:v]fade=t=out:st={offset}:d={duration}:color=white[v1];"
             f"[1:v]fade=t=in:st=0:d={duration}:color=white[v2];"
-            
-            # Concatenate
-            f"[v1][v2]concat=n=2:v=1:a=0[v]"
+            f"[v1][v2]xfade=transition=fade:duration={duration}:offset={offset}[v]"
         )
         
         cmd = [
@@ -251,17 +224,18 @@ class CustomTransitions:
             '-map', '[v]',
             '-map', '[a]',
             '-c:v', 'libx264',
-            '-preset', config.MOVIEPY_PRESET,
-            '-crf', str(config.CRF),
+            '-preset', 'medium',
+            '-crf', '20',
             '-pix_fmt', 'yuv420p',
             '-c:a', 'aac',
+            '-shortest',
             output_path
         ]
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         
         if result.returncode != 0:
-            logger.error(f"Flash transition failed: {result.stderr[-500:]}")
+            logger.error(f"Flash failed: {result.stderr[-1000:]}")
             raise RuntimeError("Flash transition failed")
         
         return output_path
@@ -273,36 +247,50 @@ class CustomTransitions:
         output_path: str,
         duration: float = 0.3
     ) -> str:
-        """
-        Apply aggressive zoom punch transition
-        
-        Zooms in aggressively at end of clip1
-        """
+        """Zoom punch - FIXED audio sync"""
         logger.info("Applying zoom punch transition")
         
         def get_duration(path):
             cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
                    '-of', 'default=noprint_wrappers=1:nokey=1', path]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             return float(result.stdout.strip())
         
-        clip1_dur = get_duration(clip1_path)
-        zoom_start = clip1_dur - duration
-        fps = config.DEFAULT_FPS
-        zoom_frames = int(duration * fps)
-        zoom_start_frame = int(zoom_start * fps)
+        def get_resolution(path):
+            cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                   '-show_entries', 'stream=width,height',
+                   '-of', 'csv=p=0', path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            w, h = result.stdout.strip().split(',')
+            return int(w), int(h)
         
-        # Aggressive zoom with quadratic acceleration
+        clip1_dur = get_duration(clip1_path)
+        clip2_dur = get_duration(clip2_path)
+        width, height = get_resolution(clip1_path)
+        offset = clip1_dur - duration
+        
+        # Split and zoom only last part
         filter_complex = (
-            f"[0:v]zoompan="
-            f"z='if(lte(on,{zoom_start_frame}),1,1+3*pow((on-{zoom_start_frame})/{zoom_frames},2))':"
-            f"d=1:s={{w}}x{{h}}:fps={fps}[v1];"
+            # Clip1: split before/after zoom point
+            f"[0:v]split[nozoom][dozoom];"
             
-            # Clip2 normal
+            # Before zoom: normal
+            f"[nozoom]trim=end={offset},setpts=PTS-STARTPTS[v1a];"
+            
+            # Zoom part
+            f"[dozoom]trim=start={offset},"
+            f"scale=iw*1.5:ih*1.5,"
+            f"crop={width}:{height},"
+            f"setpts=PTS-STARTPTS[v1b];"
+            
+            # Clip2: normal
             f"[1:v]copy[v2];"
             
-            # Quick fade transition
-            f"[v1][v2]xfade=transition=fade:duration=0.1:offset={clip1_dur-0.1}[v]"
+            # Fade zoom to clip2
+            f"[v1b][v2]xfade=transition=fade:duration=0.1:offset=0[fade];"
+            
+            # Concat all
+            f"[v1a][fade]concat=n=2:v=1:a=0[v]"
         )
         
         cmd = [
@@ -313,37 +301,29 @@ class CustomTransitions:
             '-map', '[v]',
             '-map', '[a]',
             '-c:v', 'libx264',
-            '-preset', config.MOVIEPY_PRESET,
-            '-crf', str(config.CRF),
+            '-preset', 'medium',
+            '-crf', '20',
             '-pix_fmt', 'yuv420p',
             '-c:a', 'aac',
+            '-shortest',
             output_path
         ]
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         
         if result.returncode != 0:
-            logger.error(f"Zoom punch transition failed: {result.stderr[-500:]}")
-            raise RuntimeError("Zoom punch transition failed")
+            logger.error(f"Zoom punch failed: {result.stderr[-1000:]}")
+            raise RuntimeError("Zoom punch failed")
         
         return output_path
 
 
 class SubtitleEffect:
-    """Subtitle rendering for FFmpeg"""
+    """Subtitle rendering"""
     
     @staticmethod
     def create_srt_file(words: list, output_path: str) -> str:
-        """
-        Create SRT subtitle file from word timestamps
-        
-        Args:
-            words: List of {word, start, end} dictionaries
-            output_path: Path to save SRT file
-            
-        Returns:
-            Path to created SRT file
-        """
+        """Create SRT file"""
         if not words:
             return None
         
@@ -357,7 +337,6 @@ class SubtitleEffect:
             start = word_data['start']
             end = word_data['end']
             
-            # Convert to SRT timestamp format: HH:MM:SS,mmm
             def format_time(seconds):
                 hours = int(seconds // 3600)
                 minutes = int((seconds % 3600) // 60)
@@ -368,47 +347,43 @@ class SubtitleEffect:
             srt_lines.append(f"{i}")
             srt_lines.append(f"{format_time(start)} --> {format_time(end)}")
             srt_lines.append(word)
-            srt_lines.append("")  # Blank line between entries
+            srt_lines.append("")
         
-        # Write SRT file
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(srt_lines))
         
-        logger.debug(f"Created SRT file: {output_path} ({len(words)} words)")
         return output_path
     
     @staticmethod
-    def build_subtitle_filter(srt_path: str, font_size: int = None) -> str:
-        """
-        Build FFmpeg subtitles filter
-        
-        Args:
-            srt_path: Path to SRT file
-            font_size: Font size (uses config default if None)
-            
-        Returns:
-            FFmpeg subtitles filter string
-        """
-        if not srt_path or not Path(srt_path).exists():
+    def build_subtitle_filter(words: List[dict], resolution: Tuple[int, int]) -> str:
+        """Build drawtext filter for centered subtitles"""
+        if not words:
             return ""
         
-        if font_size is None:
-            font_size = config.SUBTITLE_FONT_SIZE
+        font_size = config.SUBTITLE_FONT_SIZE
+        drawtext_filters = []
         
-        # Escape path for FFmpeg
-        srt_escaped = str(srt_path).replace('\\', '/').replace(':', '\\:')
+        for word_data in words:
+            word = word_data['word'].strip()
+            if not word:
+                continue
+            
+            start = word_data['start']
+            end = word_data['end']
+            
+            word_escaped = word.replace('\\', '\\\\').replace("'", "'\\''").replace(':', '\\:').replace('%', '\\%')
+            
+            drawtext = (
+                f"drawtext="
+                f"text='{word_escaped}':"
+                f"fontsize={font_size}:"
+                f"fontcolor=white:"
+                f"borderw=5:"
+                f"bordercolor=black:"
+                f"x=(w-text_w)/2:"
+                f"y=(h-text_h)/2:"
+                f"enable='between(t,{start:.3f},{end:.3f})'"
+            )
+            drawtext_filters.append(drawtext)
         
-        # ASS style for subtitles
-        style = (
-            f"FontName=Montserrat Bold,"
-            f"FontSize={font_size},"
-            f"PrimaryColour=&HFFFFFF&,"  # White
-            f"OutlineColour=&H000000&,"  # Black outline
-            f"BorderStyle=1,"
-            f"Outline=5,"
-            f"Shadow=0,"
-            f"Alignment=2,"  # Center bottom
-            f"MarginV=50"
-        )
-        
-        return f"subtitles='{srt_escaped}':force_style='{style}'"
+        return ",".join(drawtext_filters) if drawtext_filters else ""

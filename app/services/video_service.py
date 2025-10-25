@@ -1,6 +1,5 @@
 """
-Video Service - Pure FFmpeg with Ken Burns, Transitions, and Subtitles
-No MoviePy - Maximum Performance
+Video Service - Pure FFmpeg with Ken Burns, Transitions, and Subtitles (Fixed)
 """
 import subprocess
 import tempfile
@@ -48,27 +47,23 @@ class VideoService:
         
         logger.debug(f"Processing slide: {Path(slide.image_path).name} ({duration:.2f}s)")
         
-        # Create subtitle file first if needed
-        srt_path = None
-        if words:
-            srt_path = str(output_path).replace('.mp4', '.srt')
-            SubtitleEffect.create_srt_file(words, srt_path)
-        
-        # Build complete filter_complex as single chain
+        # Build filter chain
         filter_chain = []
         
         # Start with input
         filter_chain.append("[0:v]")
         
-        # 1. Scale and pad
+        # 1. Scale to COVER resolution with high quality
         filter_chain.append(
             f"scale={self.resolution[0]}:{self.resolution[1]}:"
-            f"force_original_aspect_ratio=decrease,"
-            f"pad={self.resolution[0]}:{self.resolution[1]}:"
-            f"(ow-iw)/2:(oh-ih)/2:black"
+            f"force_original_aspect_ratio=increase:flags=lanczos,"
+            f"crop={self.resolution[0]}:{self.resolution[1]}"
         )
         
-        # 2. Ken Burns effect (if enabled)
+        # 2. Set FPS
+        filter_chain.append(f",fps={self.fps}")
+        
+        # 3. Ken Burns effect (if enabled)
         if config.ENABLE_KEN_BURNS:
             kb_filter = KenBurnsEffect.build_filter(
                 duration, 
@@ -77,13 +72,14 @@ class VideoService:
             )
             filter_chain.append(",")
             filter_chain.append(kb_filter)
+            # Trim to exact duration
+            filter_chain.append(f",trim=duration={duration},setpts=PTS-STARTPTS")
+        else:
+            filter_chain.append(",setpts=PTS-STARTPTS")
         
-        # 3. Set PTS
-        filter_chain.append(",setpts=PTS-STARTPTS")
-        
-        # 4. Subtitles (if available)
-        if srt_path:
-            subtitle_filter = SubtitleEffect.build_subtitle_filter(srt_path)
+        # 4. Subtitles (drawtext - centered)
+        if words:
+            subtitle_filter = SubtitleEffect.build_subtitle_filter(words, self.resolution)
             if subtitle_filter:
                 filter_chain.append(",")
                 filter_chain.append(subtitle_filter)
@@ -91,7 +87,7 @@ class VideoService:
         # End with output label
         filter_chain.append("[out]")
         
-        # Join everything into single filter string
+        # Join into single filter string
         filter_complex = "".join(filter_chain)
         
         # Build FFmpeg command
@@ -105,8 +101,8 @@ class VideoService:
             '-map', '[out]',
             '-map', '1:a',
             '-c:v', 'libx264',
-            '-preset', config.MOVIEPY_PRESET,
-            '-crf', str(config.CRF),
+            '-preset', 'medium',  # Better quality than veryfast
+            '-crf', '18',  # Higher quality (lower CRF)
             '-pix_fmt', 'yuv420p',
             '-c:a', 'aac',
             '-b:a', '192k',
@@ -127,10 +123,6 @@ class VideoService:
             logger.error(f"FFmpeg stderr: {result.stderr[-1000:]}")
             raise RuntimeError(f"Failed to process slide: {result.returncode}")
         
-        # Cleanup subtitle file
-        if srt_path and Path(srt_path).exists():
-            Path(srt_path).unlink()
-        
         return output_path
     
     def apply_transition(
@@ -140,25 +132,14 @@ class VideoService:
         output_path: str,
         transition_duration: float = None
     ) -> str:
-        """
-        Apply custom transition (glitch, flash, or zoom_punch)
-        
-        Args:
-            clip1_path: First clip path
-            clip2_path: Second clip path
-            output_path: Output path
-            transition_duration: Duration in seconds
-            
-        Returns:
-            Path to output video with transition
-        """
+        """Apply random custom transition"""
         if transition_duration is None:
             transition_duration = getattr(config, 'TRANSITION_DURATION', 0.3)
         
-        # Get random transition from custom set
+        # Get RANDOM transition each time
         transition = CustomTransitions.get_random_transition()
         
-        logger.info(f"Applying '{transition}' transition")
+        logger.info(f"Applying '{transition}' transition (random)")
         
         try:
             if transition == 'glitch':
@@ -175,26 +156,61 @@ class VideoService:
                 )
             else:
                 logger.warning(f"Unknown transition: {transition}, using fade")
-                # Fallback to simple fade
                 return self._apply_simple_fade(
                     clip1_path, clip2_path, output_path, transition_duration
                 )
         except Exception as e:
             logger.error(f"Transition '{transition}' failed: {e}")
-            raise
+            logger.info("Falling back to simple fade")
+            return self._apply_simple_fade(
+                clip1_path, clip2_path, output_path, transition_duration
+            )
+    
+    def _apply_simple_fade(
+        self,
+        clip1_path: str,
+        clip2_path: str,
+        output_path: str,
+        duration: float
+    ) -> str:
+        """Simple fade transition (fallback)"""
+        def get_duration(path):
+            cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                   '-of', 'default=noprint_wrappers=1:nokey=1', path]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            return float(result.stdout.strip())
+        
+        clip1_dur = get_duration(clip1_path)
+        offset = clip1_dur - duration
+        
+        filter_complex = (
+            f"[0:v][1:v]xfade=transition=fade:duration={duration}:offset={offset}[v]"
+        )
+        
+        cmd = [
+            'ffmpeg', '-y',
+            '-i', clip1_path,
+            '-i', clip2_path,
+            '-filter_complex', f"{filter_complex};[0:a][1:a]acrossfade=d={duration}[a]",
+            '-map', '[v]',
+            '-map', '[a]',
+            '-c:v', 'libx264',
+            '-preset', config.MOVIEPY_PRESET,
+            '-crf', str(config.CRF),
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac',
+            output_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        
+        if result.returncode != 0:
+            raise RuntimeError("Fade transition failed")
+        
+        return output_path
     
     def concatenate_videos(self, video_paths: List[str], output_path: str) -> str:
-        """
-        Concatenate videos without transitions (fallback)
-        
-        Args:
-            video_paths: List of video file paths
-            output_path: Output path
-            
-        Returns:
-            Path to concatenated video
-        """
-        # Create concat file
+        """Concatenate videos without transitions (fallback)"""
         concat_file = str(output_path).replace('.mp4', '_concat.txt')
         
         with open(concat_file, 'w') as f:
@@ -217,7 +233,6 @@ class VideoService:
             timeout=600
         )
         
-        # Cleanup concat file
         Path(concat_file).unlink(missing_ok=True)
         
         if result.returncode != 0:
@@ -232,22 +247,7 @@ class VideoService:
         output_path: str,
         words_per_slide: List[List[dict]] = None
     ) -> str:
-        """
-        Assemble video with Ken Burns + Transitions + Subtitles
-        
-        Process:
-        1. Process each slide with Ken Burns and subtitles
-        2. Apply transitions between slides
-        3. Merge all clips into final video
-        
-        Args:
-            slides: List of Slide objects
-            output_path: Output video path
-            words_per_slide: Word timestamps per slide for subtitles
-            
-        Returns:
-            Path to final video
-        """
+        """Assemble video with Ken Burns + Transitions + Subtitles"""
         logger.info(f"Assembling video: {len(slides)} slides")
         
         try:
@@ -282,7 +282,6 @@ class VideoService:
             if len(processed_clips) > 1 and hasattr(config, 'TRANSITION_DURATION'):
                 logger.info("Step 2: Applying transitions...")
                 
-                # Merge clips progressively with transitions
                 current_clip = processed_clips[0]
                 
                 for i in range(1, len(processed_clips)):
@@ -297,7 +296,6 @@ class VideoService:
                             str(merged_clip)
                         )
                         
-                        # Remove previous merged clip to save space
                         if i > 1:
                             Path(current_clip).unlink(missing_ok=True)
                         
@@ -307,26 +305,20 @@ class VideoService:
                         logger.warning(f"Transition failed: {e}")
                         logger.info("Falling back to concatenation")
                         
-                        # Fallback: concatenate without transitions
                         remaining_clips = [current_clip] + processed_clips[i:]
                         self.concatenate_videos(remaining_clips, output_path)
                         
-                        # Cleanup and return
                         shutil.rmtree(temp_dir, ignore_errors=True)
                         return output_path
                 
-                # Move final merged clip to output
                 shutil.move(current_clip, output_path)
                 
             else:
-                # Step 2 (no transitions): Simple concatenation
                 logger.info("Step 2: Concatenating clips (no transitions)...")
                 
                 if len(processed_clips) == 1:
-                    # Single clip - just move it
                     shutil.move(processed_clips[0], output_path)
                 else:
-                    # Multiple clips - concatenate
                     self.concatenate_videos(processed_clips, output_path)
             
             # Cleanup temp directory
@@ -344,7 +336,6 @@ class VideoService:
         except Exception as e:
             logger.error(f"Failed to assemble video: {e}", exc_info=True)
             
-            # Cleanup on error
             if 'temp_dir' in locals():
                 shutil.rmtree(temp_dir, ignore_errors=True)
             
