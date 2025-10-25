@@ -1,5 +1,5 @@
 """
-Effects Helper - Ken Burns and Transitions (Working Version)
+Effects Helper - Ken Burns and Transitions (CLEAN WORKING VERSION)
 """
 import random
 import subprocess
@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 
 class KenBurnsEffect:
-    """Ken Burns effect - FIXED VERSION"""
+    """Ken Burns effect - smooth zoom/pan"""
     
     @staticmethod
     def generate_params() -> Dict:
@@ -54,9 +54,8 @@ class KenBurnsEffect:
         params: Dict = None
     ) -> str:
         """
-        Build smooth Ken Burns filter (NO SHAKING)
-        
-        Key fix: Use format=pix_fmts=yuv420p BEFORE zoompan
+        Build smooth Ken Burns filter
+        Scale to 4000px before zoompan to prevent jitter
         """
         if params is None:
             params = KenBurnsEffect.generate_params()
@@ -68,15 +67,14 @@ class KenBurnsEffect:
         z_start = params['zoom_start']
         z_end = params['zoom_end']
         
-        # CRITICAL: Smooth interpolation without jumps
-        # Use 'on' (output frame number) for smooth progression
+        # Smooth zoom using output frame number
         zoom_expr = f"{z_start}+({z_end}-{z_start})*on/{total_frames}"
         
         # Center by default
         x_expr = "iw/2-(iw/zoom/2)"
         y_expr = "ih/2-(ih/zoom/2)"
         
-        # Apply pan if needed
+        # Apply pan
         if direction == "pan_left":
             x_expr = f"iw/2-(iw/zoom/2)+iw*{params['pan_x']}*(1-on/{total_frames})"
         elif direction == "pan_right":
@@ -86,9 +84,9 @@ class KenBurnsEffect:
         elif direction == "pan_down":
             y_expr = f"ih/2-(ih/zoom/2)-ih*{params['pan_y']}*(1-on/{total_frames})"
         
-        # Build filter (KEY: format before zoompan prevents shaking)
+        # 4000px scaling prevents jitter, faster than 8000px
         kb_filter = (
-            f"format=pix_fmts=yuv420p,"
+            f"scale=4000:-1:flags=lanczos,"
             f"zoompan="
             f"z='{zoom_expr}':"
             f"x='{x_expr}':"
@@ -102,7 +100,7 @@ class KenBurnsEffect:
 
 
 class CustomTransitions:
-    """Simple working transitions"""
+    """Working transitions"""
     
     TRANSITIONS = ['glitch', 'flash', 'zoom_punch']
     
@@ -118,7 +116,8 @@ class CustomTransitions:
         duration: float = 0.3
     ) -> str:
         """
-        RGB Glitch - ONLY at transition point
+        RGB Glitch - apply ONLY to transition section
+        Uses split+trim+concat to apply geq only to last/first seconds
         """
         logger.info("Applying glitch transition")
         
@@ -132,39 +131,26 @@ class CustomTransitions:
         clip2_dur = get_duration(clip2_path)
         offset = clip1_dur - duration
         
-        shift = 15
+        shift = 8
         
-        # Split clip1 into before/after transition point
-        # Apply glitch ONLY to last 'duration' seconds
+        # Split clips, apply geq only to transition parts, then concat
         filter_complex = (
-            # Clip1: split at transition point
-            f"[0:v]split[before1][after1];"
+            # Clip1: split into normal part + glitched part
+            f"[0:v]split=2[c1_normal][c1_glitch];"
+            f"[c1_normal]trim=end={offset},setpts=PTS-STARTPTS[c1_pre];"
+            f"[c1_glitch]trim=start={offset},setpts=PTS-STARTPTS,"
+            f"geq=r='r(X-{shift},Y)':g='g(X,Y)':b='b(X+{shift},Y)'[c1_post];"
+            f"[c1_pre][c1_post]concat=n=2:v=1:a=0[v1];"
             
-            # Before part: no glitch
-            f"[before1]trim=end={offset},setpts=PTS-STARTPTS[v1a];"
+            # Clip2: split into glitched part + normal part  
+            f"[1:v]split=2[c2_glitch][c2_normal];"
+            f"[c2_glitch]trim=end={duration},setpts=PTS-STARTPTS,"
+            f"geq=r='r(X+{shift},Y)':g='g(X,Y)':b='b(X-{shift},Y)'[c2_pre];"
+            f"[c2_normal]trim=start={duration},setpts=PTS-STARTPTS[c2_post];"
+            f"[c2_pre][c2_post]concat=n=2:v=1:a=0[v2];"
             
-            # After part: RGB glitch
-            f"[after1]trim=start={offset},"
-            f"geq="
-            f"r='r(X-{shift},Y)':"
-            f"g='g(X,Y)':"
-            f"b='b(X+{shift},Y)',"
-            f"setpts=PTS-STARTPTS[v1b];"
-            
-            # Clip2: RGB glitch at start (opposite direction)
-            f"[1:v]trim=end={duration},"
-            f"geq="
-            f"r='r(X+{shift},Y)':"
-            f"g='g(X,Y)':"
-            f"b='b(X-{shift},Y)',"
-            f"setpts=PTS-STARTPTS[v2a];"
-            
-            # Rest of clip2: no glitch
-            f"[1:v]trim=start={duration},setpts=PTS-STARTPTS[v2b];"
-            
-            # Concat: v1a + fade(v1b, v2a) + v2b
-            f"[v1b][v2a]xfade=transition=fade:duration={duration}:offset=0[fade];"
-            f"[v1a][fade][v2b]concat=n=3:v=1:a=0[v]"
+            # Crossfade between clips
+            f"[v1][v2]xfade=transition=fade:duration={duration}:offset={offset}[v]"
         )
         
         cmd = [
@@ -247,7 +233,10 @@ class CustomTransitions:
         output_path: str,
         duration: float = 0.3
     ) -> str:
-        """Zoom punch - FIXED audio sync"""
+        """
+        Zoom punch - quick zoom in at end of clip1
+        Uses pzoom for video clips (key discovery from Stack Overflow)
+        """
         logger.info("Applying zoom punch transition")
         
         def get_duration(path):
@@ -264,40 +253,43 @@ class CustomTransitions:
             w, h = result.stdout.strip().split(',')
             return int(w), int(h)
         
+        def get_fps(path):
+            cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                   '-show_entries', 'stream=r_frame_rate',
+                   '-of', 'csv=p=0', path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            num, den = result.stdout.strip().split('/')
+            return int(num) / int(den)
+        
         clip1_dur = get_duration(clip1_path)
-        clip2_dur = get_duration(clip2_path)
         width, height = get_resolution(clip1_path)
+        fps = get_fps(clip1_path)
         offset = clip1_dur - duration
         
-        # Split and zoom only last part
+        zoom_frames = int(duration * fps)
+        zoom_increment = 0.5 / zoom_frames  # Zoom from 1.0 to 1.5
+        
+        # Apply zoompan to clip1 - zoom in during last seconds
+        # KEY: use pzoom (previous zoom) and d=1 for video clips
         filter_complex = (
-            # Clip1: split before/after zoom point
-            f"[0:v]split[nozoom][dozoom];"
+            f"[0:v]zoompan="
+            f"z='pzoom+{zoom_increment}':"
+            f"x='iw/2-(iw/zoom/2)':"
+            f"y='ih/2-(ih/zoom/2)':"
+            f"d=1:"
+            f"s={width}x{height}:"
+            f"fps={int(fps)}[v1];"
             
-            # Before zoom: normal
-            f"[nozoom]trim=end={offset},setpts=PTS-STARTPTS[v1a];"
-            
-            # Zoom part
-            f"[dozoom]trim=start={offset},"
-            f"scale=iw*1.5:ih*1.5,"
-            f"crop={width}:{height},"
-            f"setpts=PTS-STARTPTS[v1b];"
-            
-            # Clip2: normal
             f"[1:v]copy[v2];"
             
-            # Fade zoom to clip2
-            f"[v1b][v2]xfade=transition=fade:duration=0.1:offset=0[fade];"
-            
-            # Concat all
-            f"[v1a][fade]concat=n=2:v=1:a=0[v]"
+            f"[v1][v2]xfade=transition=fade:duration={duration}:offset={offset}[v]"
         )
         
         cmd = [
             'ffmpeg', '-y',
             '-i', clip1_path,
             '-i', clip2_path,
-            '-filter_complex', f"{filter_complex};[0:a][1:a]acrossfade=d=0.1[a]",
+            '-filter_complex', f"{filter_complex};[0:a][1:a]acrossfade=d={duration}[a]",
             '-map', '[v]',
             '-map', '[a]',
             '-c:v', 'libx264',
@@ -319,11 +311,11 @@ class CustomTransitions:
 
 
 class SubtitleEffect:
-    """Subtitle rendering"""
+    """Subtitle rendering with smooth fade"""
     
     @staticmethod
     def create_srt_file(words: list, output_path: str) -> str:
-        """Create SRT file"""
+        """Create SRT subtitle file"""
         if not words:
             return None
         
@@ -356,12 +348,17 @@ class SubtitleEffect:
     
     @staticmethod
     def build_subtitle_filter(words: List[dict], resolution: Tuple[int, int]) -> str:
-        """Build drawtext filter for centered subtitles"""
+        """Build drawtext filter with smooth fade in/out"""
         if not words:
             return ""
         
         font_size = config.SUBTITLE_FONT_SIZE
         drawtext_filters = []
+        
+        FADE_DURATION = 0.1  # 100ms fade
+        MIN_GAP = 0.05  # 50ms gap between words
+        
+        prev_end = 0.0
         
         for word_data in words:
             word = word_data['word'].strip()
@@ -371,7 +368,27 @@ class SubtitleEffect:
             start = word_data['start']
             end = word_data['end']
             
+            # Ensure no overlap
+            if start < prev_end + MIN_GAP:
+                start = prev_end + MIN_GAP
+            
+            # Minimum display time
+            if end - start < 0.15:
+                end = start + 0.15
+            
             word_escaped = word.replace('\\', '\\\\').replace("'", "'\\''").replace(':', '\\:').replace('%', '\\%')
+            
+            # Smooth fade using alpha expression
+            fade_in_end = start + FADE_DURATION
+            fade_out_start = end - FADE_DURATION
+            
+            # Build alpha expression for fade
+            alpha_expr = (
+                f"if(lt(t,{start:.3f}),0,"
+                f"if(lt(t,{fade_in_end:.3f}),(t-{start:.3f})/{FADE_DURATION},"
+                f"if(lt(t,{fade_out_start:.3f}),1,"
+                f"if(lt(t,{end:.3f}),({end:.3f}-t)/{FADE_DURATION},0))))"
+            )
             
             drawtext = (
                 f"drawtext="
@@ -382,8 +399,10 @@ class SubtitleEffect:
                 f"bordercolor=black:"
                 f"x=(w-text_w)/2:"
                 f"y=(h-text_h)/2:"
-                f"enable='between(t,{start:.3f},{end:.3f})'"
+                f"alpha='{alpha_expr}'"
             )
             drawtext_filters.append(drawtext)
+            
+            prev_end = end
         
         return ",".join(drawtext_filters) if drawtext_filters else ""
