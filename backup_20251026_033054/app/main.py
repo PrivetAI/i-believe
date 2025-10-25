@@ -332,7 +332,36 @@ if st.session_state.slides:
     
     for i, slide in enumerate(st.session_state.slides):
         with st.expander(f"Slide {i+1}: {slide['text'][:50]}..."):
-            col1, col2 = st.columns([3, 1])
+            col1, col2 = st.columns([1, 3])
+        
+        with col1:
+            st.download_button(
+                label="⬇️ Download Video",
+                data=video_bytes,
+                file_name=video_path.name,
+                mime="video/mp4",
+                use_container_width=True
+            )
+        
+        with col2:
+            file_size_mb = video_path.stat().st_size / (1024 * 1024)
+            st.caption(f"📊 File size: {file_size_mb:.2f} MB | Resolution: {resolution[0]}x{resolution[1]}")
+    else:
+        st.error("Video file not found")
+
+# Logs
+with st.expander("📋 View Logs"):
+    log_file_path = Path("logs/app.log")
+    if log_file_path.exists():
+        try:
+            with open(log_file_path, 'r') as f:
+                logs = f.readlines()
+                recent_logs = ''.join(logs[-100:])
+                st.text_area("Recent Logs", value=recent_logs, height=400, disabled=True)
+        except Exception as e:
+            st.error(f"Failed to load logs: {e}")
+    else:
+        st.info("No logs available yet"), col2 = st.columns([3, 1])
             
             with col1:
                 st.text_area("Text", value=slide['text'], disabled=True, key=f"text_{i}", height=100)
@@ -404,33 +433,4 @@ if st.session_state.generated_video_path:
                 video_bytes = video_file.read()
                 st.video(video_bytes)
         
-        col1, col2 = st.columns([1, 3])
-        
-        with col1:
-            st.download_button(
-                label="⬇️ Download Video",
-                data=video_bytes,
-                file_name=video_path.name,
-                mime="video/mp4",
-                use_container_width=True
-            )
-        
-        with col2:
-            file_size_mb = video_path.stat().st_size / (1024 * 1024)
-            st.caption(f"📊 File size: {file_size_mb:.2f} MB | Resolution: {resolution[0]}x{resolution[1]}")
-    else:
-        st.error("Video file not found")
-
-# Logs
-with st.expander("📋 View Logs"):
-    log_file_path = Path("logs/app.log")
-    if log_file_path.exists():
-        try:
-            with open(log_file_path, 'r') as f:
-                logs = f.readlines()
-                recent_logs = ''.join(logs[-100:])
-                st.text_area("Recent Logs", value=recent_logs, height=400, disabled=True)
-        except Exception as e:
-            st.error(f"Failed to load logs: {e}")
-    else:
-        st.info("No logs available yet")
+        col1

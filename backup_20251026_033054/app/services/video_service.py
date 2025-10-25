@@ -1,7 +1,8 @@
 """
-Video Service - Simplified FFmpeg (CPU filters + GPU encoding)
+Video Service - Direct FFmpeg with filter_complex (MAXIMUM SPEED)
 """
 import subprocess
+import json
 import random
 from pathlib import Path
 from typing import List, Tuple, Dict
@@ -18,12 +19,12 @@ logger = get_logger(__name__)
 
 
 class VideoService:
-    """Fast video generation with FFmpeg"""
+    """Ultra-fast video generation with FFmpeg filter_complex"""
     
     def __init__(self, resolution: Tuple[int, int]):
         self.resolution = resolution
         self.fps = config.DEFAULT_FPS
-        logger.info(f"VideoService: {resolution[0]}x{resolution[1]} @ {self.fps}fps")
+        logger.info(f"VideoService (filter_complex): {resolution[0]}x{resolution[1]} @ {self.fps}fps")
     
     def merge_audio_files(self, audio_paths: List[str], output_path: str) -> str:
         """Merge audio files"""
@@ -34,7 +35,7 @@ class VideoService:
                 if Path(audio_path).exists():
                     combined += AudioSegment.from_file(audio_path)
             combined.export(output_path, format="mp3")
-            logger.info(f"✓ Audio merged")
+            logger.info(f"✓ Audio merged: {output_path}")
             return output_path
         except Exception as e:
             logger.error(f"Failed to merge audio: {e}")
@@ -58,11 +59,7 @@ class VideoService:
             end = word_data['end'] - start_offset
             
             # Escape special characters
-            word_escaped = (word
-                .replace("\\", "\\\\")
-                .replace("'", "'\\\\\\''")
-                .replace(":", "\\:")
-                .replace("%", "\\%"))
+            word_escaped = word.replace("'", r"'\\\''").replace(":", r"\:").replace("%", r"\%")
             
             drawtext = (
                 f"drawtext="
@@ -91,8 +88,8 @@ class VideoService:
         
         total_frames = int(duration * self.fps)
         
-        # Simple zoompan without VAAPI complications
-        zoom_expr = f"'if(lte(zoom,1.0),{zoom_start},min(zoom+{(zoom_end-zoom_start)/total_frames},{zoom_end}))'"
+        # zoompan: smooth zoom with pan
+        zoom_expr = f"'min(zoom+0.001,max(zoom,{zoom_end}))'"
         
         zoompan = (
             f"zoompan="
@@ -109,8 +106,7 @@ class VideoService:
     def build_filter_complex(
         self,
         slides: List[Slide],
-        words_per_slide: List[List[Dict]],
-        use_vaapi: bool
+        words_per_slide: List[List[Dict]]
     ) -> str:
         """Build complete filter_complex string"""
         filter_parts = []
@@ -122,9 +118,10 @@ class VideoService:
             duration = max(slide.duration, config.MIN_SLIDE_DURATION)
             words = words_per_slide[i] if i < len(words_per_slide) else []
             
+            # Input: [i:v]
             input_label = f"[{i}:v]"
             
-            # Scale and prepare
+            # Step 1: Scale to fit resolution
             scale_filter = (
                 f"{input_label}"
                 f"scale={self.resolution[0]}:{self.resolution[1]}:force_original_aspect_ratio=increase,"
@@ -134,11 +131,11 @@ class VideoService:
                 f"setpts=PTS-STARTPTS"
             )
             
-            # Ken Burns
+            # Step 2: Ken Burns
             kb_filter = self.build_ken_burns_filter(duration)
             scale_filter += f",{kb_filter}"
             
-            # Subtitles
+            # Step 3: Subtitles
             subtitle_filter = self.build_subtitle_filter(words, current_time)
             if subtitle_filter:
                 scale_filter += f",{subtitle_filter}"
@@ -151,20 +148,12 @@ class VideoService:
             
             current_time += duration
         
-        # Concatenate videos
+        # Concatenate all slides
         concat_inputs = "".join(f"[{label}]" for label in stream_labels)
-        concat_filter = f"{concat_inputs}concat=n={len(slides)}:v=1:a=0[vtmp]"
+        concat_filter = f"{concat_inputs}concat=n={len(slides)}:v=1:a=0[vout]"
         filter_parts.append(concat_filter)
         
-        # Add hwupload for VAAPI inside filter_complex
-        if use_vaapi:
-            hwupload_filter = "[vtmp]format=nv12,hwupload[vout]"
-            filter_parts.append(hwupload_filter)
-        else:
-            # Just rename for consistency
-            filter_parts.append("[vtmp]copy[vout]")
-        
-        # Concatenate audio
+        # Audio concat
         audio_inputs = "".join(f"[{i+len(slides)}:a]" for i in range(len(slides)))
         audio_concat = f"{audio_inputs}concat=n={len(slides)}:v=0:a=1[aout]"
         filter_parts.append(audio_concat)
@@ -186,12 +175,11 @@ class VideoService:
         words_per_slide: List[List[dict]] = None
     ) -> str:
         """
-        Assemble video with FFmpeg filter_complex
+        Assemble video with filter_complex (single pass)
         
-        Strategy: CPU filters + GPU encoding (VAAPI) separately
-        This avoids VAAPI filter incompatibilities
+        5-10x faster than frame-by-frame rendering
         """
-        logger.info(f"Assembling video: {len(slides)} slides")
+        logger.info(f"Assembling video: {len(slides)} slides (filter_complex)")
         
         try:
             # Validate
@@ -204,16 +192,14 @@ class VideoService:
                 if not Path(slide.audio_path).exists():
                     raise FileNotFoundError(f"Slide {i} audio not found: {slide.audio_path}")
             
-            # Check VAAPI
-            use_vaapi = self.detect_vaapi()
-            
-            # Build filter_complex with VAAPI support
-            filter_complex = self.build_filter_complex(slides, words_per_slide or [], use_vaapi)
+            # Build filter_complex
+            filter_complex = self.build_filter_complex(slides, words_per_slide or [])
             
             # Build FFmpeg command
             cmd = ['ffmpeg', '-y']
             
-            # VAAPI device initialization (only if using VAAPI)
+            # Hardware acceleration
+            use_vaapi = self.detect_vaapi()
             if use_vaapi:
                 logger.info("🚀 Using VAAPI GPU encoding")
                 cmd.extend([
@@ -237,7 +223,7 @@ class VideoService:
             for slide in slides:
                 cmd.extend(['-i', slide.audio_path])
             
-            # Filter complex (CPU)
+            # Filter complex
             cmd.extend(['-filter_complex', filter_complex])
             
             # Map outputs
@@ -245,18 +231,16 @@ class VideoService:
             
             # Video encoding
             if use_vaapi:
-                # hwupload already in filter_complex
                 cmd.extend([
                     '-c:v', 'h264_vaapi',
-                    '-qp', str(config.CRF)
+                    '-qp', str(config.CRF),
+                    '-rc_mode', 'CQP'
                 ])
             else:
                 cmd.extend([
                     '-c:v', 'libx264',
                     '-crf', str(config.CRF),
-                    '-preset', config.MOVIEPY_PRESET,
-                    '-tune', 'fastdecode',
-                    '-pix_fmt', 'yuv420p'
+                    '-preset', config.MOVIEPY_PRESET
                 ])
             
             # Audio encoding
@@ -269,10 +253,12 @@ class VideoService:
             # Output
             cmd.extend([
                 '-movflags', '+faststart',
+                '-pix_fmt', 'yuv420p',
+                '-shortest',
                 output_path
             ])
             
-            # Log command
+            # Log command (truncated)
             logger.debug(f"FFmpeg command: {' '.join(cmd[:20])}... (total {len(cmd)} args)")
             
             # Execute
@@ -285,9 +271,8 @@ class VideoService:
             )
             
             if result.returncode != 0:
-                # Log full stderr for debugging
-                logger.error(f"FFmpeg full stderr:\n{result.stderr}")
-                raise RuntimeError(f"FFmpeg failed (code {result.returncode})")
+                logger.error(f"FFmpeg stderr: {result.stderr[-1000:]}")
+                raise RuntimeError(f"FFmpeg failed: {result.stderr[-500:]}")
             
             # Verify output
             if not Path(output_path).exists():
