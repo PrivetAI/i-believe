@@ -1,10 +1,11 @@
 """
-AI Video Generator - Streamlit Main Application
+AI Video Generator - Streamlit Main Application with Timer
 """
 import streamlit as st
 import uuid
 import shutil
 import sys
+import time
 from pathlib import Path
 from PIL import Image
 import io
@@ -43,6 +44,8 @@ if 'voices_cache' not in st.session_state:
     st.session_state.voices_cache = None
 if 'languages_cache' not in st.session_state:
     st.session_state.languages_cache = None
+if 'last_generation_time' not in st.session_state:
+    st.session_state.last_generation_time = None
 
 
 def get_cache_dir(generation_id: str) -> Path:
@@ -83,8 +86,22 @@ def save_uploaded_image(uploaded_file, generation_id: str) -> str:
     return str(file_path)
 
 
+def format_time(seconds: float) -> str:
+    """Format seconds to human readable time"""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    elif seconds < 3600:
+        minutes = int(seconds // 60)
+        secs = seconds % 60
+        return f"{minutes}m {secs:.1f}s"
+    else:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        return f"{hours}h {minutes}m"
+
+
 def generate_video(slides: list, voice: str, resolution: tuple, generation_id: str):
-    """Generate video from slides"""
+    """Generate video from slides with timer"""
     logger.info("=" * 50)
     logger.info("Starting video generation")
     logger.info(f"Generation ID: {generation_id}")
@@ -93,18 +110,29 @@ def generate_video(slides: list, voice: str, resolution: tuple, generation_id: s
     logger.info(f"Resolution: {resolution[0]}x{resolution[1]}")
     logger.info("=" * 50)
     
+    # Start timer
+    start_time = time.time()
+    
     cache_dir = get_cache_dir(generation_id)
     audio_dir = cache_dir / "audio"
     audio_dir.mkdir(exist_ok=True)
     
     progress_bar = st.progress(0)
     status_text = st.empty()
+    timer_text = st.empty()
+    
+    def update_timer():
+        """Update elapsed time display"""
+        elapsed = time.time() - start_time
+        timer_text.info(f"⏱️ Elapsed time: {format_time(elapsed)}")
     
     try:
         # Step 1: Generate TTS for each slide
         status_text.text("Step 1/4: Generating text-to-speech audio...")
+        update_timer()
         logger.info("Step 1: Generating TTS audio")
         
+        step1_start = time.time()
         tts_service = TTSService()
         slide_objects = []
         
@@ -128,13 +156,17 @@ def generate_video(slides: list, voice: str, resolution: tuple, generation_id: s
             
             progress = (i + 1) / len(slides) * 0.25
             progress_bar.progress(progress)
+            update_timer()
         
-        logger.info("TTS generation completed")
+        step1_time = time.time() - step1_start
+        logger.info(f"TTS generation completed in {step1_time:.2f}s")
         
         # Step 2: Generate word-level timestamps with Whisper
         status_text.text("Step 2/4: Generating word-level timestamps...")
+        update_timer()
         logger.info("Step 2: Generating word timestamps")
         
+        step2_start = time.time()
         whisper_service = WhisperService()
         words_per_slide = []
         
@@ -146,13 +178,17 @@ def generate_video(slides: list, voice: str, resolution: tuple, generation_id: s
             
             progress = 0.25 + (i + 1) / len(slides) * 0.25
             progress_bar.progress(progress)
+            update_timer()
         
-        logger.info("Whisper transcription completed")
+        step2_time = time.time() - step2_start
+        logger.info(f"Whisper transcription completed in {step2_time:.2f}s")
         
         # Step 3: Assemble video
         status_text.text("Step 3/4: Assembling video with effects...")
+        update_timer()
         logger.info("Step 3: Assembling video")
         
+        step3_start = time.time()
         progress_bar.progress(0.5)
         
         video_service = VideoService(resolution)
@@ -166,17 +202,41 @@ def generate_video(slides: list, voice: str, resolution: tuple, generation_id: s
             words_per_slide
         )
         
+        step3_time = time.time() - step3_start
+        logger.info(f"Video assembly completed in {step3_time:.2f}s")
+        
         progress_bar.progress(0.75)
+        update_timer()
         
         # Step 4: Finalize
         status_text.text("Step 4/4: Finalizing video...")
+        update_timer()
         logger.info("Step 4: Finalizing")
         
         progress_bar.progress(1.0)
-        status_text.text("✅ Video generation completed!")
+        
+        # Calculate total time
+        total_time = time.time() - start_time
+        
+        # Show breakdown
+        status_text.success(f"✅ Video generation completed!")
+        timer_text.success(f"""
+        ⏱️ **Generation Time Breakdown:**
+        - TTS Audio: {format_time(step1_time)}
+        - Whisper Timestamps: {format_time(step2_time)}
+        - Video Assembly: {format_time(step3_time)}
+        - **Total: {format_time(total_time)}**
+        """)
         
         logger.info("Video generation successful")
         logger.info(f"Output: {video_path}")
+        logger.info(f"Total time: {total_time:.2f}s")
+        logger.info(f"  - TTS: {step1_time:.2f}s")
+        logger.info(f"  - Whisper: {step2_time:.2f}s")
+        logger.info(f"  - Assembly: {step3_time:.2f}s")
+        
+        # Store generation time
+        st.session_state.last_generation_time = total_time
         
         # Cleanup cache
         cleanup_cache(generation_id)
@@ -184,8 +244,10 @@ def generate_video(slides: list, voice: str, resolution: tuple, generation_id: s
         return video_path
         
     except Exception as e:
-        logger.error(f"Video generation failed: {e}", exc_info=True)
-        status_text.text(f"❌ Error: {str(e)}")
+        elapsed = time.time() - start_time
+        logger.error(f"Video generation failed after {elapsed:.2f}s: {e}", exc_info=True)
+        status_text.error(f"❌ Error: {str(e)}")
+        timer_text.warning(f"⏱️ Failed after {format_time(elapsed)}")
         progress_bar.empty()
         raise
 
@@ -193,7 +255,11 @@ def generate_video(slides: list, voice: str, resolution: tuple, generation_id: s
 # Main UI
 st.title("🎬 AI Video Generator")
 st.markdown("Generate short-form videos with AI-powered voiceover and subtitles")
-st.markdown("Всем привет это текст для теста \n Новая строка текста для теста \n Для быстрого копирования и теста")
+st.markdown("Текст для быстрой вставки и теста")
+
+# Show last generation time if available
+if st.session_state.last_generation_time:
+    st.info(f"⏱️ Last generation took: **{format_time(st.session_state.last_generation_time)}**")
 
 # Sidebar - Configuration
 with st.sidebar:
@@ -376,7 +442,6 @@ if st.session_state.slides:
                     )
                     
                     st.session_state.generated_video_path = video_path
-                    st.success("✅ Video generated successfully!")
                     
                 except Exception as e:
                     st.error(f"Failed to generate video: {str(e)}")
@@ -393,7 +458,7 @@ if st.session_state.generated_video_path:
     video_path = Path(st.session_state.generated_video_path)
     
     if video_path.exists():
-        # Video player in column to control width
+        # Video player
         col1, col2, col3 = st.columns([1, 2, 1])
         
         with col2:
@@ -418,6 +483,7 @@ if st.session_state.generated_video_path:
             st.caption(f"📊 File size: {file_size_mb:.2f} MB | Resolution: {resolution[0]}x{resolution[1]}")
     else:
         st.error("Video file not found")
+
 # Logs section
 with st.expander("📋 View Logs"):
     log_file_path = Path("logs/app.log")
