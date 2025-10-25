@@ -83,50 +83,6 @@ def apply_glitch_transition(clip1: VideoClip, clip2: VideoClip, duration: float)
     return [clip1_glitched, clip2_glitched]
 
 
-def apply_spin_blur_transition(clip1: VideoClip, clip2: VideoClip, duration: float) -> List[VideoClip]:
-    """
-    Optimized spin blur - cached blur factors
-    """
-    total1 = clip1.duration
-    
-    def spin_out(get_frame, t):
-        if t >= total1 - duration:
-            progress = (t - (total1 - duration)) / duration
-            frame = get_frame(t)
-            
-            angle = progress * 360
-            frame_rotated = rotate(frame, angle, reshape=False, order=0, prefilter=False)
-            
-            blur_factor = int(progress * 6) + 1
-            if blur_factor > 1:
-                small = fast_resize_numpy(frame_rotated, 1.0 / blur_factor)
-                frame_rotated = fast_resize_numpy(small, blur_factor)
-            
-            return frame_rotated
-        return get_frame(t)
-    
-    def spin_in(get_frame, t):
-        if t < duration:
-            progress = t / duration
-            frame = get_frame(t)
-            
-            angle = (1 - progress) * 360
-            frame_rotated = rotate(frame, angle, reshape=False, order=0, prefilter=False)
-            
-            blur_factor = int((1 - progress) * 6) + 1
-            if blur_factor > 1:
-                small = fast_resize_numpy(frame_rotated, 1.0 / blur_factor)
-                frame_rotated = fast_resize_numpy(small, blur_factor)
-            
-            return frame_rotated
-        return get_frame(t)
-    
-    clip1_spin = clip1.fl(spin_out)
-    clip2_spin = clip2.fl(spin_in)
-    
-    return [clip1_spin, clip2_spin]
-
-
 def apply_flash_transition(clip1: VideoClip, clip2: VideoClip, duration: float) -> List[VideoClip]:
     """
     Optimized flash transition - vectorized operations
@@ -226,7 +182,6 @@ def apply_transitions(clips: List[VideoClip]) -> VideoClip:
     # Pre-define all transitions
     transition_functions = [
         ("glitch", apply_glitch_transition),
-        ("spin_blur", apply_spin_blur_transition),
         ("flash", apply_flash_transition),
         ("zoom_punch", apply_zoom_punch_transition)
     ]

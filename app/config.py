@@ -21,7 +21,7 @@ KEN_BURNS_INTERPOLATION_STEPS = 10  # Pre-calculate key frames
 
 # Transition settings
 TRANSITION_DURATION = 0.4  # Slightly faster (was 0.5)
-TRANSITION_TYPES = ["glitch", "spin_blur", "flash", "zoom_punch"]
+TRANSITION_TYPES = ["glitch", "flash", "zoom_punch"]
 
 # Subtitle settings - Optimized word-by-word
 SUBTITLE_FONT = "Montserrat-Bold"
