@@ -58,7 +58,7 @@ def create_text_image_transparent(text: str, fontsize: int, color: str, outline_
 
 def render_subtitles(video_clip, words: List[Dict], video_size: tuple) -> CompositeVideoClip:
     """
-    Render word-by-word subtitles with highlight effect
+    Render word-by-word subtitles with white color centered on screen
     Each word appears individually at the center of the screen
     
     Args:
@@ -73,12 +73,12 @@ def render_subtitles(video_clip, words: List[Dict], video_size: tuple) -> Compos
         logger.warning("No words provided for subtitles")
         return video_clip
     
-    logger.info(f"Rendering {len(words)} word-by-word subtitles")
+    logger.info(f"Rendering {len(words)} word-by-word subtitles (white, centered)")
     
     width, height = video_size
     
-    # Calculate vertical position (80% down from top)
-    subtitle_y = int(height * 0.8)
+    # Calculate center position (both horizontal and vertical)
+    subtitle_y = height // 2
     
     subtitle_clips = []
     word_cache = {}
@@ -95,38 +95,39 @@ def render_subtitles(video_clip, words: List[Dict], video_size: tuple) -> Compos
         
         # Generate or retrieve from cache
         if word not in word_cache:
-            # Create yellow (highlighted) version
-            yellow_img, size = create_text_image_transparent(
+            # Create white version (only white, no yellow)
+            white_img, size = create_text_image_transparent(
                 word,
                 config.SUBTITLE_FONT_SIZE,
-                'yellow',
+                'white',  # Only white color
                 config.SUBTITLE_OUTLINE_COLOR,
                 config.SUBTITLE_OUTLINE_WIDTH
             )
             
             word_cache[word] = {
-                'yellow': yellow_img,
+                'image': white_img,
                 'size': size
             }
         
         # Get word image and size
-        yellow_img = word_cache[word]['yellow']
+        word_img = word_cache[word]['image']
         word_width, word_height = word_cache[word]['size']
         
-        # Calculate horizontal center position
-        subtitle_x = (width - yellow_img.shape[1]) // 2
+        # Calculate center position (both X and Y)
+        subtitle_x = (width - word_img.shape[1]) // 2
+        subtitle_y_pos = (height - word_img.shape[0]) // 2
         
         # Create clip for this word
-        word_clip = ImageClip(yellow_img, transparent=True)
+        word_clip = ImageClip(word_img, transparent=True)
         word_clip = word_clip.set_duration(duration)
-        word_clip = word_clip.set_position((subtitle_x, subtitle_y - word_height // 2))
+        word_clip = word_clip.set_position((subtitle_x, subtitle_y_pos))
         word_clip = word_clip.set_start(start_time)
         
         subtitle_clips.append(word_clip)
         
-        logger.debug(f"Word {i+1}/{len(words)}: '{word}' at {start_time:.2f}s-{end_time:.2f}s")
+        logger.debug(f"Word {i+1}/{len(words)}: '{word}' at {start_time:.2f}s-{end_time:.2f}s (centered)")
     
-    logger.info(f"Created {len(subtitle_clips)} subtitle clips")
+    logger.info(f"Created {len(subtitle_clips)} centered white subtitle clips")
     
     if subtitle_clips:
         return CompositeVideoClip([video_clip] + subtitle_clips)

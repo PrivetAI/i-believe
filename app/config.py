@@ -21,13 +21,14 @@ KEN_BURNS_DIRECTIONS = ["zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up"
 TRANSITION_DURATION = 0.5
 TRANSITION_TYPES = ["fade", "crossfade", "wipe_left", "wipe_right", "wipe_up", "wipe_down", "dissolve"]
 
-# Subtitle settings - TikTok style
-# Subtitle settings - TikTok style
+# Subtitle settings - White centered style
 SUBTITLE_FONT = "Montserrat-Bold"
 SUBTITLE_FONT_SIZE = 70
+SUBTITLE_COLOR = "white"  # Changed from yellow to white
 SUBTITLE_OUTLINE_COLOR = "black"
 SUBTITLE_OUTLINE_WIDTH = 5
 SUBTITLE_LINE_SPACING = 0.4  # 40% от высоты строки
+SUBTITLE_POSITION = "center"  # Changed to center
 
 # Attention effects settings
 EFFECTS_PROBABILITY = 0.3
@@ -38,7 +39,7 @@ MIN_SLIDE_DURATION = 5.0
 CACHE_AUTO_CLEANUP = True
 
 # Whisper settings
-WHISPER_MODEL = "medium"
+WHISPER_MODEL = "small"
 
 # API settings
 API_TIMEOUT = 60
