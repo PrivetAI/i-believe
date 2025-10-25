@@ -10,6 +10,7 @@ CRF = 26
 MOVIEPY_PRESET = 'veryfast'
 
 # Ken Burns settings
+ENABLE_KEN_BURNS = True  # Set to False for maximum speed
 KEN_BURNS_ZOOM_RANGE = (1.0, 1.3)
 KEN_BURNS_PAN_RANGE = (0.05, 0.15)
 KEN_BURNS_DIRECTIONS = ["zoom_in", "zoom_out", "pan_left", "pan_right"]
