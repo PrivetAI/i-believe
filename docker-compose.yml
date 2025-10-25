@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   app:
@@ -11,12 +10,14 @@ services:
       - ./cache:/app/cache
       - ./logs:/app/logs
       - whisper-cache:/root/.cache/huggingface
+    devices:
+      - /dev/dri:/dev/dri
     environment:
       - PYTHONUNBUFFERED=1
+      - LIBVA_DRIVER_NAME=iHD
     restart: unless-stopped
     mem_limit: 8g
     cpus: 6
 
 volumes:
   whisper-cache:
-  

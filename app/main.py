@@ -193,6 +193,7 @@ def generate_video(slides: list, voice: str, resolution: tuple, generation_id: s
 # Main UI
 st.title("🎬 AI Video Generator")
 st.markdown("Generate short-form videos with AI-powered voiceover and subtitles")
+st.markdown("Всем привет это текст для теста \n Новая строка текста для теста \n Для быстрого копирования и теста")
 
 # Sidebar - Configuration
 with st.sidebar:
