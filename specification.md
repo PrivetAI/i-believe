@@ -495,7 +495,6 @@ KEN_BURNS_DIRECTIONS = ["zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up"
 
 # Transition settings
 TRANSITION_DURATION = 0.5
-TRANSITION_TYPES = ["fade", "crossfade", "wipe_left", "wipe_right", "wipe_up", "wipe_down", "dissolve"]
 
 # Subtitle settings
 SUBTITLE_FONT = "fonts/tiktok-style.ttf"
