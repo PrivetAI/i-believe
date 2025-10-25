@@ -1,11 +1,12 @@
 """
-Ken Burns effect implementation
+Ken Burns effect implementation - Optimized for low-end CPU
 """
 import sys
 from pathlib import Path
 import random
 from typing import Dict
 import numpy as np
+from scipy.ndimage import zoom as scipy_zoom
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -22,7 +23,6 @@ def generate_ken_burns_params() -> Dict:
     zoom_start = random.uniform(*config.KEN_BURNS_ZOOM_RANGE)
     zoom_end = random.uniform(*config.KEN_BURNS_ZOOM_RANGE)
     
-    # Ensure zoom difference is visible
     if abs(zoom_end - zoom_start) < 0.1:
         zoom_end = zoom_start + 0.2
     
@@ -44,10 +44,29 @@ def generate_ken_burns_params() -> Dict:
     return params
 
 
+def resize_frame_numpy(frame: np.ndarray, scale: float) -> np.ndarray:
+    """
+    Fast frame resize using NumPy/SciPy (faster than PIL for video frames)
+    
+    Args:
+        frame: Input frame array
+        scale: Scale factor
+        
+    Returns:
+        Resized frame
+    """
+    if abs(scale - 1.0) < 0.01:
+        return frame
+    
+    # Use scipy zoom which is faster than PIL for this use case
+    # zoom works on each dimension: (height, width, channels)
+    return scipy_zoom(frame, (scale, scale, 1), order=1, prefilter=False)
+
+
 def apply_ken_burns(clip, params: Dict, duration: float):
     """
-    Apply Ken Burns effect with parameters from config
-    Optimized: pre-calculate values, minimize operations per frame
+    Apply Ken Burns effect - Optimized with NumPy operations
+    No PIL conversion, pure NumPy for speed
     """
     direction = params['direction']
     zoom_start = params['zoom_start']
@@ -57,12 +76,12 @@ def apply_ken_burns(clip, params: Dict, duration: float):
     
     w, h = clip.size
     
-    logger.info(f"Applying Ken Burns: {direction}, zoom {zoom_start:.2f}->{zoom_end:.2f}")
+    logger.info(f"Applying Ken Burns (optimized): {direction}, zoom {zoom_start:.2f}->{zoom_end:.2f}")
     
     # Pre-calculate constants
     zoom_diff = zoom_end - zoom_start
     
-    # Determine pan offsets based on direction
+    # Determine pan factors
     pan_x_factor = 0
     pan_y_factor = 0
     
@@ -82,32 +101,29 @@ def apply_ken_burns(clip, params: Dict, duration: float):
         # Calculate zoom
         zoom = zoom_start + zoom_diff * progress
         
-        # Resize
-        from PIL import Image
-        img = Image.fromarray(frame)
-        new_w = int(w * zoom)
-        new_h = int(h * zoom)
-        img = img.resize((new_w, new_h), Image.LANCZOS)
-        zoomed = np.array(img)
+        # Fast resize with NumPy/SciPy
+        zoomed = resize_frame_numpy(frame, zoom)
+        
+        zoomed_h, zoomed_w = zoomed.shape[:2]
         
         # Calculate offsets
         if direction in ["pan_left", "pan_right"]:
-            max_x = max(0, zoomed.shape[1] - w)
+            max_x = max(0, zoomed_w - w)
             x_offset = int(max_x * (0.5 + pan_x_factor * progress))
-            y_offset = (zoomed.shape[0] - h) // 2
+            y_offset = (zoomed_h - h) // 2
         elif direction in ["pan_up", "pan_down"]:
-            x_offset = (zoomed.shape[1] - w) // 2
-            max_y = max(0, zoomed.shape[0] - h)
+            x_offset = (zoomed_w - w) // 2
+            max_y = max(0, zoomed_h - h)
             y_offset = int(max_y * (0.5 + pan_y_factor * progress))
         else:
-            x_offset = (zoomed.shape[1] - w) // 2
-            y_offset = (zoomed.shape[0] - h) // 2
+            x_offset = (zoomed_w - w) // 2
+            y_offset = (zoomed_h - h) // 2
         
         # Clamp offsets
-        x_offset = max(0, min(x_offset, zoomed.shape[1] - w))
-        y_offset = max(0, min(y_offset, zoomed.shape[0] - h))
+        x_offset = max(0, min(x_offset, zoomed_w - w))
+        y_offset = max(0, min(y_offset, zoomed_h - h))
         
-        # Crop
+        # Crop using NumPy slicing (very fast)
         return zoomed[y_offset:y_offset+h, x_offset:x_offset+w]
     
     return clip.fl(effect)

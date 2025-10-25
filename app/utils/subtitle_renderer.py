@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from moviepy.editor import CompositeVideoClip, ImageClip
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
@@ -7,32 +7,36 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Global cache for rendered text images
+_TEXT_CACHE = {}
 
-def create_text_image_transparent(text: str, fontsize: int, color: str, outline_color: str, outline_width: int) -> tuple:
-    """Create high-quality text image with transparency"""
+
+def prerender_all_words(words: List[Dict]) -> Dict[str, Tuple[np.ndarray, Tuple[int, int]]]:
+    """
+    Pre-render all unique words at once to avoid repeated rendering
+    
+    Args:
+        words: List of word dictionaries
+        
+    Returns:
+        Dictionary mapping word -> (image_array, (width, height))
+    """
+    unique_words = set(w['word'].strip() for w in words if w['word'].strip())
+    cache = {}
+    
+    logger.info(f"Pre-rendering {len(unique_words)} unique words")
+    
+    # Load font once
     try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/montserrat/Montserrat-Bold.ttf", fontsize)
+        font = ImageFont.truetype(
+            "/usr/share/fonts/truetype/montserrat/Montserrat-Bold.ttf", 
+            config.SUBTITLE_FONT_SIZE
+        )
     except:
         try:
-            font = ImageFont.truetype("Montserrat-Bold.ttf", fontsize)
+            font = ImageFont.truetype("Montserrat-Bold.ttf", config.SUBTITLE_FONT_SIZE)
         except:
             font = ImageFont.load_default()
-    
-    # Get text dimensions
-    temp_img = Image.new('RGBA', (1, 1))
-    temp_draw = ImageDraw.Draw(temp_img)
-    bbox = temp_draw.textbbox((0, 0), text, font=font, stroke_width=outline_width)
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
-    
-    # Add padding for outline
-    padding = outline_width * 2
-    img_width = text_width + padding * 2
-    img_height = text_height + padding * 2
-    
-    # Create image with transparency
-    img = Image.new('RGBA', (img_width, img_height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
     
     # Color mapping
     color_map = {
@@ -40,26 +44,50 @@ def create_text_image_transparent(text: str, fontsize: int, color: str, outline_
         'yellow': (255, 255, 0, 255),
         'black': (0, 0, 0, 255)
     }
-    text_color = color_map.get(color, (255, 255, 255, 255))
-    stroke_color = color_map.get(outline_color, (0, 0, 0, 255))
+    text_color = color_map.get(config.SUBTITLE_COLOR, (255, 255, 255, 255))
+    stroke_color = color_map.get(config.SUBTITLE_OUTLINE_COLOR, (0, 0, 0, 255))
     
-    # Draw text with outline
-    draw.text(
-        (padding - bbox[0], padding - bbox[1]),
-        text,
-        font=font,
-        fill=text_color,
-        stroke_width=outline_width,
-        stroke_fill=stroke_color
-    )
+    for word in unique_words:
+        # Get text dimensions
+        temp_img = Image.new('RGBA', (1, 1))
+        temp_draw = ImageDraw.Draw(temp_img)
+        bbox = temp_draw.textbbox(
+            (0, 0), 
+            word, 
+            font=font, 
+            stroke_width=config.SUBTITLE_OUTLINE_WIDTH
+        )
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        
+        # Add padding
+        padding = config.SUBTITLE_OUTLINE_WIDTH * 2
+        img_width = text_width + padding * 2
+        img_height = text_height + padding * 2
+        
+        # Create image with transparency
+        img = Image.new('RGBA', (img_width, img_height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        
+        # Draw text with outline
+        draw.text(
+            (padding - bbox[0], padding - bbox[1]),
+            word,
+            font=font,
+            fill=text_color,
+            stroke_width=config.SUBTITLE_OUTLINE_WIDTH,
+            stroke_fill=stroke_color
+        )
+        
+        cache[word] = (np.array(img), (text_width, text_height))
     
-    return np.array(img), (text_width, text_height)
+    logger.info(f"Pre-rendering complete. Cache size: {len(cache)} words")
+    return cache
 
 
 def render_subtitles(video_clip, words: List[Dict], video_size: tuple) -> CompositeVideoClip:
     """
-    Render word-by-word subtitles with white color centered on screen
-    Each word appears individually at the center of the screen
+    Render word-by-word subtitles with optimized pre-rendering
     
     Args:
         video_clip: Base video clip
@@ -73,15 +101,14 @@ def render_subtitles(video_clip, words: List[Dict], video_size: tuple) -> Compos
         logger.warning("No words provided for subtitles")
         return video_clip
     
-    logger.info(f"Rendering {len(words)} word-by-word subtitles (white, centered)")
+    logger.info(f"Rendering {len(words)} word-by-word subtitles (optimized)")
     
     width, height = video_size
     
-    # Calculate center position (both horizontal and vertical)
-    subtitle_y = height // 2
+    # Pre-render all unique words at once
+    word_cache = prerender_all_words(words)
     
     subtitle_clips = []
-    word_cache = {}
     
     for i, word_data in enumerate(words):
         word = word_data['word'].strip()
@@ -89,45 +116,24 @@ def render_subtitles(video_clip, words: List[Dict], video_size: tuple) -> Compos
         end_time = word_data['end']
         duration = end_time - start_time
         
-        # Skip empty words
-        if not word:
+        if not word or word not in word_cache:
             continue
         
-        # Generate or retrieve from cache
-        if word not in word_cache:
-            # Create white version (only white, no yellow)
-            white_img, size = create_text_image_transparent(
-                word,
-                config.SUBTITLE_FONT_SIZE,
-                'white',  # Only white color
-                config.SUBTITLE_OUTLINE_COLOR,
-                config.SUBTITLE_OUTLINE_WIDTH
-            )
-            
-            word_cache[word] = {
-                'image': white_img,
-                'size': size
-            }
+        # Get pre-rendered word
+        word_img, (word_width, word_height) = word_cache[word]
         
-        # Get word image and size
-        word_img = word_cache[word]['image']
-        word_width, word_height = word_cache[word]['size']
-        
-        # Calculate center position (both X and Y)
+        # Calculate center position
         subtitle_x = (width - word_img.shape[1]) // 2
         subtitle_y_pos = (height - word_img.shape[0]) // 2
         
-        # Create clip for this word
-        word_clip = ImageClip(word_img, transparent=True)
-        word_clip = word_clip.set_duration(duration)
+        # Create clip for this word (reuse array)
+        word_clip = ImageClip(word_img, transparent=True, duration=duration)
         word_clip = word_clip.set_position((subtitle_x, subtitle_y_pos))
         word_clip = word_clip.set_start(start_time)
         
         subtitle_clips.append(word_clip)
-        
-        logger.debug(f"Word {i+1}/{len(words)}: '{word}' at {start_time:.2f}s-{end_time:.2f}s (centered)")
     
-    logger.info(f"Created {len(subtitle_clips)} centered white subtitle clips")
+    logger.info(f"Created {len(subtitle_clips)} subtitle clips from cache")
     
     if subtitle_clips:
         return CompositeVideoClip([video_clip] + subtitle_clips)
