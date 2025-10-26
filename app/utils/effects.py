@@ -1,5 +1,5 @@
 """
-Effects Helper - Ken Burns and Transitions (CLEAN WORKING VERSION)
+Effects Helper - Ken Burns and Transitions (CapCut-style Dynamic Glitch)
 """
 import random
 import subprocess
@@ -100,7 +100,7 @@ class KenBurnsEffect:
 
 
 class CustomTransitions:
-    """Working transitions"""
+    """Working transitions with timebase normalization"""
     
     TRANSITIONS = ['glitch', 'flash', 'zoom_punch']
     
@@ -116,10 +116,10 @@ class CustomTransitions:
         duration: float = 0.3
     ) -> str:
         """
-        RGB Glitch - apply ONLY to transition section
-        Uses split+trim+concat to apply geq only to last/first seconds
+        Dynamic CapCut-style Glitch transition
+        Multi-layer effect with RGB shift + noise + distortion
         """
-        logger.info("Applying glitch transition")
+        logger.info("Applying DYNAMIC glitch transition (CapCut-style)")
         
         def get_duration(path):
             cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
@@ -128,29 +128,62 @@ class CustomTransitions:
             return float(result.stdout.strip())
         
         clip1_dur = get_duration(clip1_path)
-        clip2_dur = get_duration(clip2_path)
         offset = clip1_dur - duration
         
-        shift = 8
+        # Dynamic parameters
+        rgb_shift = random.randint(8, 15)  # More aggressive shift
+        noise_strength = random.uniform(0.02, 0.05)  # Add noise
         
-        # Split clips, apply geq only to transition parts, then concat
+        # Build complex glitch effect with multiple layers
         filter_complex = (
-            # Clip1: split into normal part + glitched part
-            f"[0:v]split=2[c1_normal][c1_glitch];"
-            f"[c1_normal]trim=end={offset},setpts=PTS-STARTPTS[c1_pre];"
-            f"[c1_glitch]trim=start={offset},setpts=PTS-STARTPTS,"
-            f"geq=r='r(X-{shift},Y)':g='g(X,Y)':b='b(X+{shift},Y)'[c1_post];"
-            f"[c1_pre][c1_post]concat=n=2:v=1:a=0[v1];"
+            # === CLIP 1 PROCESSING ===
+            # Normalize and split into 3 streams
+            f"[0:v]settb=AVTB,fps=30[v0_base];"
+            f"[v0_base]split=3[v0a][v0b][v0c];"
             
-            # Clip2: split into glitched part + normal part  
-            f"[1:v]split=2[c2_glitch][c2_normal];"
-            f"[c2_glitch]trim=end={duration},setpts=PTS-STARTPTS,"
-            f"geq=r='r(X+{shift},Y)':g='g(X,Y)':b='b(X-{shift},Y)'[c2_pre];"
-            f"[c2_normal]trim=start={duration},setpts=PTS-STARTPTS[c2_post];"
-            f"[c2_pre][c2_post]concat=n=2:v=1:a=0[v2];"
+            # Normal part (before transition)
+            f"[v0a]trim=end={offset},setpts=PTS-STARTPTS[v0_pre];"
             
-            # Crossfade between clips
-            f"[v1][v2]xfade=transition=fade:duration={duration}:offset={offset}[v]"
+            # Glitched part - Layer 1: RGB shift
+            f"[v0b]trim=start={offset},setpts=PTS-STARTPTS,"
+            f"geq=r='r(X-{rgb_shift},Y)':g='g(X,Y)':b='b(X+{rgb_shift},Y)'[v0_glitch1];"
+            
+            # Glitched part - Layer 2: Add noise + random displacement
+            f"[v0c]trim=start={offset},setpts=PTS-STARTPTS,"
+            f"noise=c0s={int(noise_strength*100)}:allf=t,"
+            f"geq=r='r(X+sin(Y/10)*5,Y)':g='g(X,Y)':b='b(X-sin(Y/10)*5,Y)'[v0_glitch2];"
+            
+            # Blend the two glitch layers
+            f"[v0_glitch1][v0_glitch2]blend=all_mode=screen:all_opacity=0.3[v0_glitched];"
+            
+            # Concatenate normal + glitched
+            f"[v0_pre][v0_glitched]concat=n=2:v=1:a=0,settb=AVTB,fps=30[v0_final];"
+            
+            # === CLIP 2 PROCESSING ===
+            # Normalize and split into 3 streams
+            f"[1:v]settb=AVTB,fps=30[v1_base];"
+            f"[v1_base]split=3[v1a][v1b][v1c];"
+            
+            # Glitched part - Layer 1: RGB shift (opposite direction)
+            f"[v1a]trim=end={duration},setpts=PTS-STARTPTS,"
+            f"geq=r='r(X+{rgb_shift},Y)':g='g(X,Y)':b='b(X-{rgb_shift},Y)'[v1_glitch1];"
+            
+            # Glitched part - Layer 2: Add noise + displacement
+            f"[v1b]trim=end={duration},setpts=PTS-STARTPTS,"
+            f"noise=c0s={int(noise_strength*100)}:allf=t,"
+            f"geq=r='r(X-sin(Y/8)*4,Y)':g='g(X,Y)':b='b(X+sin(Y/8)*4,Y)'[v1_glitch2];"
+            
+            # Blend glitch layers
+            f"[v1_glitch1][v1_glitch2]blend=all_mode=screen:all_opacity=0.3[v1_glitched];"
+            
+            # Normal part (after transition)
+            f"[v1c]trim=start={duration},setpts=PTS-STARTPTS[v1_post];"
+            
+            # Concatenate glitched + normal
+            f"[v1_glitched][v1_post]concat=n=2:v=1:a=0,settb=AVTB,fps=30[v1_final];"
+            
+            # === CROSSFADE ===
+            f"[v0_final][v1_final]xfade=transition=fade:duration={duration}:offset={offset}[v]"
         )
         
         cmd = [
@@ -172,9 +205,10 @@ class CustomTransitions:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         
         if result.returncode != 0:
-            logger.error(f"Glitch failed: {result.stderr[-1000:]}")
-            raise RuntimeError("Glitch transition failed")
+            logger.error(f"Dynamic glitch failed: {result.stderr[-1000:]}")
+            raise RuntimeError("Dynamic glitch transition failed")
         
+        logger.info("✓ Dynamic glitch applied successfully")
         return output_path
     
     @staticmethod
@@ -184,7 +218,7 @@ class CustomTransitions:
         output_path: str,
         duration: float = 0.3
     ) -> str:
-        """White flash transition"""
+        """White flash transition with normalized timebase"""
         logger.info("Applying flash transition")
         
         def get_duration(path):
@@ -196,10 +230,11 @@ class CustomTransitions:
         clip1_dur = get_duration(clip1_path)
         offset = clip1_dur - duration
         
+        # Normalize timebase and fps before xfade
         filter_complex = (
-            f"[0:v]fade=t=out:st={offset}:d={duration}:color=white[v1];"
-            f"[1:v]fade=t=in:st=0:d={duration}:color=white[v2];"
-            f"[v1][v2]xfade=transition=fade:duration={duration}:offset={offset}[v]"
+            f"[0:v]settb=AVTB,fps=30,fade=t=out:st={offset}:d={duration}:color=white[v0];"
+            f"[1:v]settb=AVTB,fps=30,fade=t=in:st=0:d={duration}:color=white[v1];"
+            f"[v0][v1]xfade=transition=fade:duration={duration}:offset={offset}[v]"
         )
         
         cmd = [
@@ -234,8 +269,8 @@ class CustomTransitions:
         duration: float = 0.3
     ) -> str:
         """
-        Zoom punch - quick zoom in at end of clip1
-        Uses pzoom for video clips (key discovery from Stack Overflow)
+        Zoom punch - aggressive quick zoom at transition point
+        Fixed version: applies zoom to END of clip1 only
         """
         logger.info("Applying zoom punch transition")
         
@@ -253,36 +288,43 @@ class CustomTransitions:
             w, h = result.stdout.strip().split(',')
             return int(w), int(h)
         
-        def get_fps(path):
-            cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
-                   '-show_entries', 'stream=r_frame_rate',
-                   '-of', 'csv=p=0', path]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            num, den = result.stdout.strip().split('/')
-            return int(num) / int(den)
-        
         clip1_dur = get_duration(clip1_path)
         width, height = get_resolution(clip1_path)
-        fps = get_fps(clip1_path)
         offset = clip1_dur - duration
         
-        zoom_frames = int(duration * fps)
-        zoom_increment = 0.5 / zoom_frames  # Zoom from 1.0 to 1.5
+        zoom_start = 1.0
+        zoom_end = 4  # Aggressive zoom
+        zoom_frames = int(duration * 30)
         
-        # Apply zoompan to clip1 - zoom in during last seconds
-        # KEY: use pzoom (previous zoom) and d=1 for video clips
+        # Split clip1 into before/during transition, apply zoom only to transition part
         filter_complex = (
-            f"[0:v]zoompan="
-            f"z='pzoom+{zoom_increment}':"
+            # Process clip1: normalize, split, apply zoom to last part
+            f"[0:v]settb=AVTB,fps=30[v0_norm];"
+            f"[v0_norm]split=2[v0_pre][v0_zoom];"
+            
+            # Normal part (no zoom)
+            f"[v0_pre]trim=end={offset},setpts=PTS-STARTPTS[v0_before];"
+            
+            # Zoom part: scale up first, then zoom
+            f"[v0_zoom]trim=start={offset},setpts=PTS-STARTPTS,"
+            f"scale={int(width*2)}:{int(height*2)}:flags=lanczos,"
+            f"zoompan="
+            f"z='if(lte(on,{zoom_frames}),{zoom_start}+({zoom_end}-{zoom_start})*on/{zoom_frames},{zoom_end})':"
             f"x='iw/2-(iw/zoom/2)':"
             f"y='ih/2-(ih/zoom/2)':"
             f"d=1:"
             f"s={width}x{height}:"
-            f"fps={int(fps)}[v1];"
+            f"fps=30"
+            f"[v0_after];"
             
-            f"[1:v]copy[v2];"
+            # Concatenate both parts
+            f"[v0_before][v0_after]concat=n=2:v=1:a=0,settb=AVTB,fps=30[v0_final];"
             
-            f"[v1][v2]xfade=transition=fade:duration={duration}:offset={offset}[v]"
+            # Normalize clip2
+            f"[1:v]settb=AVTB,fps=30[v1_final];"
+            
+            # Crossfade
+            f"[v0_final][v1_final]xfade=transition=fade:duration={duration}:offset={offset}[v]"
         )
         
         cmd = [
@@ -307,6 +349,7 @@ class CustomTransitions:
             logger.error(f"Zoom punch failed: {result.stderr[-1000:]}")
             raise RuntimeError("Zoom punch failed")
         
+        logger.info("✓ Zoom punch applied successfully")
         return output_path
 
 
