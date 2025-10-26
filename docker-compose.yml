@@ -25,23 +25,41 @@ services:
     mem_limit: 8g
     cpus: 6
 
-  ui:
-    build: .
-    container_name: video-generator-ui
+  # ui:
+  #   build: .
+  #   container_name: video-generator-ui
+  #   ports:
+  #     - "8501:8501"
+  #   volumes:
+  #     - ./cache:/app/cache
+  #     - ./output:/app/output
+  #     - ./logs:/app/logs
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - API_BASE_URL=http://api:8000/api/v1
+  #   depends_on:
+  #     - api
+  #   command: streamlit run ui/app.py --server.port 8501 --server.address 0.0.0.0
+  #   restart: unless-stopped
+  #   mem_limit: 1g
+
+  ai_module:
+    build: ./ai_module
+    container_name: video-generator-ai
     ports:
-      - "8501:8501"
+      - "8502:8502"
     volumes:
-      - ./cache:/app/cache
+      - ./ai_module/cache:/app/cache
       - ./output:/app/output
-      - ./logs:/app/logs
     environment:
       - PYTHONUNBUFFERED=1
-      - API_BASE_URL=http://api:8000/api/v1
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN}
     depends_on:
       - api
-    command: streamlit run ui/app.py --server.port 8501 --server.address 0.0.0.0
     restart: unless-stopped
-    mem_limit: 2g
+    mem_limit: 1g
+
 
 volumes:
   whisper-cache:
