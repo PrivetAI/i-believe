@@ -269,10 +269,10 @@ class CustomTransitions:
         duration: float = 0.3
     ) -> str:
         """
-        Zoom punch - aggressive quick zoom at transition point
-        Fixed version: applies zoom to END of clip1 only
+        Dynamic Zoom Punch - zoom IN to new clip with motion blur and shake
+        Creates explosive "punch" effect on clip2 entrance
         """
-        logger.info("Applying zoom punch transition")
+        logger.info("Applying DYNAMIC zoom punch transition")
         
         def get_duration(path):
             cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
@@ -292,39 +292,59 @@ class CustomTransitions:
         width, height = get_resolution(clip1_path)
         offset = clip1_dur - duration
         
-        zoom_start = 1.0
-        zoom_end = 4  # Aggressive zoom
+        # Dynamic parameters
+        zoom_start = random.uniform(1.8, 2.5)  # Start zoomed IN
+        zoom_end = 1.0  # Zoom OUT to normal
+        shake_intensity = random.randint(8, 15)
         zoom_frames = int(duration * 30)
         
-        # Split clip1 into before/during transition, apply zoom only to transition part
+        # Motion blur simulation using unsharp
+        blur_amount = random.uniform(0.5, 1.0)
+        
         filter_complex = (
-            # Process clip1: normalize, split, apply zoom to last part
-            f"[0:v]settb=AVTB,fps=30[v0_norm];"
-            f"[v0_norm]split=2[v0_pre][v0_zoom];"
+            # === CLIP 1: Normal ===
+            f"[0:v]settb=AVTB,fps=30[v0];"
             
-            # Normal part (no zoom)
-            f"[v0_pre]trim=end={offset},setpts=PTS-STARTPTS[v0_before];"
+            # === CLIP 2: Zoom punch with shake and blur ===
+            f"[1:v]settb=AVTB,fps=30[v1_norm];"
+            f"[v1_norm]split=2[v1_punch][v1_normal];"
             
-            # Zoom part: scale up first, then zoom
-            f"[v0_zoom]trim=start={offset},setpts=PTS-STARTPTS,"
-            f"scale={int(width*2)}:{int(height*2)}:flags=lanczos,"
+            # Punch part: zoom IN to OUT with shake and motion blur
+            f"[v1_punch]trim=end={duration},setpts=PTS-STARTPTS,"
+            # Scale up for quality
+            f"scale={int(width*3)}:{int(height*3)}:flags=lanczos,"
+            # Dynamic shake using geq with oscillation
+            f"geq=r='r(X+{shake_intensity}*sin(N/2),Y+{shake_intensity}*cos(N/2))':"
+            f"g='g(X+{shake_intensity}*sin(N/2),Y+{shake_intensity}*cos(N/2))':"
+            f"b='b(X+{shake_intensity}*sin(N/2),Y+{shake_intensity}*cos(N/2))',"
+            # Zoom with easing (fast at start, slow at end)
             f"zoompan="
-            f"z='if(lte(on,{zoom_frames}),{zoom_start}+({zoom_end}-{zoom_start})*on/{zoom_frames},{zoom_end})':"
+            f"z='if(lte(on,{zoom_frames}),"
+            f"{zoom_start}+({zoom_end}-{zoom_start})*pow(on/{zoom_frames},2),"  # Ease out quad
+            f"{zoom_end})':"
             f"x='iw/2-(iw/zoom/2)':"
             f"y='ih/2-(ih/zoom/2)':"
             f"d=1:"
             f"s={width}x{height}:"
-            f"fps=30"
-            f"[v0_after];"
+            f"fps=30,"
+            # Motion blur effect
+            f"unsharp=5:5:-{blur_amount}:5:5:0"
+            f"[v1_punched];"
             
-            # Concatenate both parts
-            f"[v0_before][v0_after]concat=n=2:v=1:a=0,settb=AVTB,fps=30[v0_final];"
+            # Normal part after punch
+            f"[v1_normal]trim=start={duration},setpts=PTS-STARTPTS[v1_after];"
             
-            # Normalize clip2
-            f"[1:v]settb=AVTB,fps=30[v1_final];"
+            # Concatenate punch + normal
+            f"[v1_punched][v1_after]concat=n=2:v=1:a=0,settb=AVTB,fps=30[v1_final];"
             
-            # Crossfade
-            f"[v0_final][v1_final]xfade=transition=fade:duration={duration}:offset={offset}[v]"
+            # === CROSSFADE with brightness boost ===
+            f"[v0][v1_final]xfade=transition=fade:duration={duration}:offset={offset}[v_faded];"
+            
+            # Add brightness flash at transition point
+            f"[v_faded]eq="
+            f"brightness='if(between(t,{offset},{offset+0.1}),0.3*(1-(t-{offset})/0.1),0)':"
+            f"saturation='if(between(t,{offset},{offset+0.15}),1+0.5*(1-(t-{offset})/0.15),1)'"
+            f"[v]"
         )
         
         cmd = [
@@ -346,12 +366,11 @@ class CustomTransitions:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         
         if result.returncode != 0:
-            logger.error(f"Zoom punch failed: {result.stderr[-1000:]}")
-            raise RuntimeError("Zoom punch failed")
+            logger.error(f"Dynamic zoom punch failed: {result.stderr[-1000:]}")
+            raise RuntimeError("Dynamic zoom punch failed")
         
-        logger.info("✓ Zoom punch applied successfully")
+        logger.info("✓ Dynamic zoom punch applied successfully")
         return output_path
-
 
 class SubtitleEffect:
     """Subtitle rendering with smooth fade"""
@@ -398,8 +417,9 @@ class SubtitleEffect:
         font_size = config.SUBTITLE_FONT_SIZE
         drawtext_filters = []
         
-        FADE_DURATION = 0.1  # 100ms fade
+        FADE_DURATION = 0.05  # 50ms fade
         MIN_GAP = 0.05  # 50ms gap between words
+        MIN_DISPLAY = 0.3  # Минимальное время показа слова
         
         prev_end = 0.0
         
@@ -415,9 +435,10 @@ class SubtitleEffect:
             if start < prev_end + MIN_GAP:
                 start = prev_end + MIN_GAP
             
-            # Minimum display time
-            if end - start < 0.15:
-                end = start + 0.15
+            # Гарантируем минимальное время показа
+            duration = end - start
+            if duration < MIN_DISPLAY:
+                end = start + MIN_DISPLAY
             
             word_escaped = word.replace('\\', '\\\\').replace("'", "'\\''").replace(':', '\\:').replace('%', '\\%')
             
