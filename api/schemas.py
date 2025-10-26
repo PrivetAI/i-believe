@@ -3,12 +3,6 @@ Pydantic schemas for API requests and responses
 """
 from pydantic import BaseModel, Field, HttpUrl
 from typing import List, Optional, Literal
-from enum import Enum
-
-
-class ResolutionType(str, Enum):
-    VERTICAL = "9:16"
-    HORIZONTAL = "16:9"
 
 
 class SlideInput(BaseModel):
@@ -30,7 +24,7 @@ class GenerateVideoRequest(BaseModel):
     """Request for video generation"""
     slides: List[SlideInput] = Field(..., min_items=1, max_items=50)
     voice: str = Field(..., description="Edge TTS voice identifier")
-    resolution: ResolutionType = Field(default=ResolutionType.VERTICAL)
+    resolution: str = Field(default="9:16", description="Video resolution: 9:16 or 16:9")
     
     class Config:
         json_schema_extra = {

@@ -17,9 +17,9 @@ from api.schemas import (
     JobStatusResponse
 )
 from core.pipeline import VideoPipeline
-from services.tts_service import TTSService
+from core.services.tts_service import TTSService
 import config
-from utils.logger import get_logger
+from core.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -77,8 +77,13 @@ async def generate_video_manual(
     """
     job_id = str(uuid.uuid4())
     
-    # Validate resolution
-    resolution = config.VIDEO_RESOLUTIONS.get(request.resolution.value)
+    # Get resolution - request.resolution is now a string
+    resolution = None
+    for key, value in config.VIDEO_RESOLUTIONS.items():
+        if request.resolution in key or key.startswith(request.resolution):
+            resolution = value
+            break
+    
     if not resolution:
         raise HTTPException(400, f"Invalid resolution: {request.resolution}")
     
@@ -139,8 +144,13 @@ async def generate_video_external(
     """
     job_id = str(uuid.uuid4())
     
-    # Validate resolution
-    resolution = config.VIDEO_RESOLUTIONS.get(request.resolution.value)
+    # Get resolution - request.resolution is now a string
+    resolution = None
+    for key, value in config.VIDEO_RESOLUTIONS.items():
+        if request.resolution in key or key.startswith(request.resolution):
+            resolution = value
+            break
+    
     if not resolution:
         raise HTTPException(400, f"Invalid resolution: {request.resolution}")
     
@@ -231,7 +241,7 @@ async def download_video(job_id: str):
 async def get_languages():
     """Get available TTS languages"""
     try:
-        languages = TTSService.get_languages()
+        languages = await TTSService.get_languages_async()
         return languages
     except Exception as e:
         logger.error(f"Failed to get languages: {e}")
@@ -242,7 +252,7 @@ async def get_languages():
 async def get_voices(language: str = None):
     """Get available TTS voices, optionally filtered by language"""
     try:
-        voices = TTSService.get_voices(language)
+        voices = await TTSService.get_voices_async(language)
         
         return [
             VoiceInfo(

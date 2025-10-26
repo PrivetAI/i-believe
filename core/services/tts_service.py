@@ -21,9 +21,9 @@ class TTSService:
         return voices
     
     @staticmethod
-    def get_voices(language: str = None) -> List[Dict]:
+    async def get_voices_async(language: str = None) -> List[Dict]:
         """
-        Get available voices, optionally filtered by language
+        Get available voices (async), optionally filtered by language
         
         Args:
             language: Optional language code (e.g., 'en-US', 'es-ES')
@@ -33,7 +33,7 @@ class TTSService:
         """
         try:
             logger.info("Fetching available voices from Edge TTS")
-            voices = asyncio.run(TTSService._get_voices_async())
+            voices = await TTSService._get_voices_async()
             
             if language:
                 voices = [v for v in voices if v.get('Locale', '').startswith(language)]
@@ -42,6 +42,28 @@ class TTSService:
                 logger.info(f"Retrieved {len(voices)} total voices")
             
             return voices
+        except Exception as e:
+            logger.error(f"Failed to fetch voices: {e}")
+            raise
+    
+    @staticmethod
+    def get_voices(language: str = None) -> List[Dict]:
+        """
+        Get available voices (sync wrapper), optionally filtered by language
+        
+        Args:
+            language: Optional language code (e.g., 'en-US', 'es-ES')
+            
+        Returns:
+            List of voice dictionaries with 'Name' and 'ShortName' keys
+        """
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(TTSService.get_voices_async(language))
+            finally:
+                loop.close()
         except Exception as e:
             logger.error(f"Failed to fetch voices: {e}")
             raise
@@ -73,7 +95,12 @@ class TTSService:
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             
             # Generate audio
-            asyncio.run(TTSService._generate_audio_async(text, voice, output_path))
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(TTSService._generate_audio_async(text, voice, output_path))
+            finally:
+                loop.close()
             
             # Get duration using pydub
             audio = AudioSegment.from_file(output_path)
@@ -87,17 +114,36 @@ class TTSService:
             raise
     
     @staticmethod
-    def get_languages() -> List[str]:
+    async def get_languages_async() -> List[str]:
         """
-        Get list of available languages
+        Get list of available languages (async)
         
         Returns:
             List of language codes
         """
         try:
-            voices = TTSService.get_voices()
+            voices = await TTSService.get_voices_async()
             languages = sorted(list(set(v.get('Locale', '')[:5] for v in voices if v.get('Locale'))))
             return languages
+        except Exception as e:
+            logger.error(f"Failed to get languages: {e}")
+            return []
+    
+    @staticmethod
+    def get_languages() -> List[str]:
+        """
+        Get list of available languages (sync wrapper)
+        
+        Returns:
+            List of language codes
+        """
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(TTSService.get_languages_async())
+            finally:
+                loop.close()
         except Exception as e:
             logger.error(f"Failed to get languages: {e}")
             return []

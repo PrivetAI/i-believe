@@ -8,9 +8,9 @@ from PIL import Image
 import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
+import os
 import config
-from utils.logger import setup_logger, get_logger
+from core.utils.logger import setup_logger, get_logger
 
 # Setup logging
 log_file = Path("logs/ui.log")
@@ -19,7 +19,7 @@ setup_logger("root", str(log_file))
 logger = get_logger(__name__)
 
 # API Configuration
-API_BASE_URL = "http://localhost:8000/api/v1"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api/v1")
 
 # Page config
 st.set_page_config(page_title="AI Video Generator", page_icon="🎬", layout="wide")
@@ -90,23 +90,31 @@ def api_get_voices(language: str):
 def api_generate_video(slides_data, voice, resolution):
     """Submit video generation job via API"""
     try:
+        # Extract clean resolution format (9:16 or 16:9)
+        resolution_clean = resolution.split()[0] if "(" in resolution else resolution
+        
         payload = {
             "slides": slides_data,
             "voice": voice,
-            "resolution": resolution
+            "resolution": resolution_clean
         }
+        
+        logger.info(f"Submitting job with payload: {payload}")
         
         response = requests.post(
             f"{API_BASE_URL}/manual/generate",
             json=payload,
             timeout=30
         )
+        
+        if response.status_code != 200:
+            logger.error(f"API error {response.status_code}: {response.text}")
+        
         response.raise_for_status()
         return response.json()
     except Exception as e:
         logger.error(f"Failed to submit job: {e}")
         raise
-
 
 def api_get_job_status(job_id: str):
     """Get job status from API"""

@@ -13,6 +13,7 @@ The project is split into **two isolated layers**:
   - **Manual mode**: Local images (current workflow)
   - **External mode**: Images from URLs (for future AI integration)
 - Background job processing with progress tracking
+- Intel GPU acceleration support (VAAPI)
 
 ### 2. **Frontend UI** (`ui/`)
 - Streamlit interface for manual slide creation
@@ -35,6 +36,7 @@ This architecture allows **complete isolation** for future AI content generation
   - Zoom punch (explosive zoom with shake)
 - **Background job processing** with progress tracking
 - **REST API** for integration with external systems
+- **Intel GPU acceleration** (VAAPI h264_vaapi encoder)
 - **Automatic cleanup** of intermediate cache files after successful render
 - **Built-in log viewer** and persistent volumes
 
@@ -59,6 +61,7 @@ video-generator/
 │   │   └── slide.py                  # Slide dataclass
 │   └── utils/
 │       ├── effects.py                # Ken Burns + Transitions + Subtitles
+│       ├── ffmpeg_renderer.py        # Direct FFmpeg renderer (VAAPI)
 │       └── logger.py                 # Logger setup
 │
 ├── ui/                               # Streamlit Frontend
@@ -76,14 +79,15 @@ video-generator/
 
 ---
 
-## 🚀 Setup
+## 🚀 Quick Start
 
 ### Prerequisites
-- Docker and Docker Compose (recommended)
+- Docker and Docker Compose
+- Intel GPU (optional, for hardware acceleration)
 - At least 8 GB RAM and modern CPU
 - Internet connection for Edge TTS and Whisper model download
 
-### Quick Start with Docker Compose
+### Start with Docker Compose
 
 ```bash
 git clone <repository-url>
@@ -97,30 +101,13 @@ docker-compose up --build
 
 Volumes are mounted for `./output`, `./cache`, and `./logs`.
 
-### Local Setup (without Docker)
+### Verify GPU Acceleration (Intel only)
 
-1. **Install system dependencies** (Ubuntu/Debian):
-   ```bash
-   sudo apt-get update
-   sudo apt-get install ffmpeg imagemagick libsm6 libxext6 libxrender-dev
-   ```
+```bash
+docker-compose exec api vainfo
+```
 
-2. **Install Python requirements**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Start Backend API**:
-   ```bash
-   cd api
-   uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-   ```
-
-4. **Start Frontend UI** (in another terminal):
-   ```bash
-   cd ui
-   streamlit run app.py --server.port 8501
-   ```
+Should show Intel GPU capabilities. If VAAPI is unavailable, system falls back to CPU encoding (libx264).
 
 ---
 
@@ -131,7 +118,7 @@ Volumes are mounted for `./output`, `./cache`, and `./logs`.
 1. **Open UI** at `http://localhost:8501`
 2. **Select voice**:
    - Choose language → Click "Load Voices" → Select voice
-3. **Configure resolution**: Vertical `9:16` or Horizontal `16:9`
+3. **Configure resolution**: `9:16` (TikTok/Reels) or `16:9` (YouTube)
 4. **Add slides**:
    - Enter narration text
    - Upload image (JPG/PNG, up to 10 MB)
@@ -141,84 +128,79 @@ Volumes are mounted for `./output`, `./cache`, and `./logs`.
    - Monitor progress in real-time
 6. **Download**: Video appears for playback and download
 
-### API Mode (for External Integration)
+---
 
-```bash
-# Submit job
-curl -X POST http://localhost:8000/api/v1/external/generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "slides": [
-      {
-        "text": "Welcome to our video",
-        "image_url": "http://example.com/image1.jpg"
-      }
-    ],
-    "voice": "en-US-AriaNeural",
-    "resolution": "9:16"
-  }'
+## 🔌 API Reference
 
-# Response: {"job_id": "abc123", "status": "queued"}
+### Base URL
+```
+http://localhost:8000/api/v1
+```
 
-# Poll status
-curl http://localhost:8000/api/v1/status/abc123
+### Endpoints
 
-# Download video
-curl -O http://localhost:8000/api/v1/download/abc123
+#### 1. Get Available Languages
+```http
+GET /languages
+```
+
+**Response:**
+```json
+[
+  "ar-SA",
+  "de-DE",
+  "en-US",
+  "es-ES",
+  "fr-FR",
+  "ru-RU",
+  "zh-CN"
+]
 ```
 
 ---
 
-## ⚙️ Configuration
+#### 2. Get Voices for Language
+```http
+GET /voices?language=en-US
+```
 
-Edit `config.py`:
+**Query Parameters:**
+- `language` (optional): Language code (e.g., `en-US`)
 
-```python
-# Video output
-VIDEO_RESOLUTIONS = {
-    "9:16 (TikTok/Reels)": (1080, 1920),
-    "16:9 (YouTube)": (1920, 1080),
-}
-DEFAULT_FPS = 20
-CRF = 23  # Lower = better quality (18-28)
-MOVIEPY_PRESET = 'medium'  # veryfast/fast/medium/slow
-
-# Ken Burns motion
-ENABLE_KEN_BURNS = True
-KEN_BURNS_ZOOM_RANGE = (1.0, 1.15)
-KEN_BURNS_PAN_RANGE = (0.03, 0.08)
-
-# Transitions
-TRANSITION_DURATION = 0.3  # seconds
-
-# Subtitles
-SUBTITLE_FONT_SIZE = 70
-
-# Whisper
-WHISPER_MODEL = "small"  # tiny/base/small/medium/large
-
-# Cache
-CACHE_AUTO_CLEANUP = True
+**Response:**
+```json
+[
+  {
+    "short_name": "en-US-AriaNeural",
+    "gender": "Female",
+    "locale": "en-US"
+  },
+  {
+    "short_name": "en-US-GuyNeural",
+    "gender": "Male",
+    "locale": "en-US"
+  }
+]
 ```
 
 ---
 
-## 🔌 API Endpoints
+#### 3. Generate Video (Manual Mode)
+```http
+POST /manual/generate
+```
 
-### Video Generation
-
-**POST** `/api/v1/manual/generate` - Generate from local images
-**POST** `/api/v1/external/generate` - Generate from URLs (for AI integration)
-
-**Request Body**:
+**Request Body:**
 ```json
 {
   "slides": [
     {
-      "text": "Slide narration",
-      "image_path": "/cache/xxx/img1.jpg"  // manual mode
-      // OR
-      "image_url": "http://..."             // external mode
+      "text": "Welcome to our video",
+      "image_path": "cache/abc123/images/slide1.jpg"
+    },
+    {
+      "text": "This is the second slide",
+      "image_path": "cache/abc123/images/slide2.jpg"
     }
   ],
   "voice": "en-US-AriaNeural",
@@ -226,82 +208,155 @@ CACHE_AUTO_CLEANUP = True
 }
 ```
 
-**Response**:
+**Response:**
 ```json
 {
   "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "queued"
+  "status": "queued",
+  "video_path": null,
+  "video_url": null,
+  "file_size_mb": null,
+  "duration_seconds": null,
+  "error": null
 }
 ```
 
-### Job Management
+---
 
-**GET** `/api/v1/status/{job_id}` - Get job status and progress
+#### 4. Generate Video (External Mode)
+```http
+POST /external/generate
+```
 
-**Response**:
+**Request Body:**
 ```json
 {
-  "job_id": "...",
-  "status": "processing",  // queued|processing|completed|failed
-  "progress": 0.65,
-  "current_step": "Assembling video...",
-  "video_path": null
+  "slides": [
+    {
+      "text": "AI-generated content",
+      "image_url": "https://example.com/image1.jpg"
+    }
+  ],
+  "voice": "en-US-AriaNeural",
+  "resolution": "16:9"
 }
 ```
 
-**GET** `/api/v1/download/{job_id}` - Download completed video
-
-### Voice Management
-
-**GET** `/api/v1/languages` - List available languages
-**GET** `/api/v1/voices?language=en-US` - List voices for language
+**Response:** Same as manual mode
 
 ---
 
-## 🐛 Troubleshooting
+#### 5. Check Job Status
+```http
+GET /status/{job_id}
+```
 
-**Cannot load languages/voices**
-- Ensure internet connection (Edge TTS requires it)
-- Check API logs: `logs/api.log`
+**Response:**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "processing",
+  "progress": 0.65,
+  "current_step": "Assembling video...",
+  "video_path": null,
+  "error": null,
+  "created_at": null,
+  "completed_at": null
+}
+```
 
-**Whisper download takes long**
-- First run downloads `small` model (~500MB)
-- Uses `whisper-cache` Docker volume for persistence
-
-**Video generation fails**
-- Check `logs/api.log` for errors
-- Verify uploaded images are valid and under 10MB
-- Ensure 8GB+ RAM available
-
-**Transitions look same**
-- Transitions are randomized each time
-- Check `TRANSITION_DURATION` in `config.py`
-
----
-
-## 📊 Logs
-
-Logs are written to:
-- API: `logs/api.log`
-- UI: `logs/ui.log`
-
-View in UI via "📋 View Logs" panel or check files directly.
+**Status Values:**
+- `queued`: Job waiting to start
+- `processing`: Video generation in progress
+- `completed`: Video ready for download
+- `failed`: Error occurred (check `error` field)
 
 ---
 
-## 🗺️ Roadmap
+#### 6. Download Video
+```http
+GET /download/{job_id}
+```
 
-- ✅ FastAPI backend with job queue
-- ✅ Manual mode with local uploads
-- ✅ External mode for AI integration
-- ⏳ Redis/Celery for production job queue
-- ⏳ AI content generator (separate project)
-- ⏳ Background music and SFX
-- ⏳ Custom subtitle themes
-- ⏳ Batch rendering
+**Response:** MP4 file (video/mp4)
 
 ---
 
-## 📝 License
+## 📋 API Usage Examples
 
-MIT License - build, modify, and ship your own videos.
+### Python (requests)
+
+```python
+import requests
+import time
+
+API_BASE = "http://localhost:8000/api/v1"
+
+# 1. Get available voices
+languages = requests.get(f"{API_BASE}/languages").json()
+print(f"Languages: {languages}")
+
+voices = requests.get(f"{API_BASE}/voices", params={"language": "en-US"}).json()
+print(f"Voices: {[v['short_name'] for v in voices]}")
+
+# 2. Submit generation job
+payload = {
+    "slides": [
+        {
+            "text": "Hello from API",
+            "image_path": "cache/test/image1.jpg"
+        }
+    ],
+    "voice": "en-US-AriaNeural",
+    "resolution": "9:16"
+}
+
+response = requests.post(f"{API_BASE}/manual/generate", json=payload)
+job_id = response.json()["job_id"]
+print(f"Job ID: {job_id}")
+
+# 3. Poll for completion
+while True:
+    status = requests.get(f"{API_BASE}/status/{job_id}").json()
+    print(f"Progress: {status['progress']:.1%} - {status['current_step']}")
+    
+    if status["status"] == "completed":
+        print("✅ Video ready!")
+        break
+    elif status["status"] == "failed":
+        print(f"❌ Failed: {status['error']}")
+        break
+    
+    time.sleep(2)
+
+# 4. Download video
+video = requests.get(f"{API_BASE}/download/{job_id}")
+with open("output.mp4", "wb") as f:
+    f.write(video.content)
+print("Downloaded!")
+```
+
+### cURL
+
+```bash
+# Get languages
+curl http://localhost:8000/api/v1/languages
+
+# Get voices
+curl "http://localhost:8000/api/v1/voices?language=en-US"
+
+# Submit job
+curl -X POST http://localhost:8000/api/v1/manual/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "slides": [{"text": "Test", "image_path": "cache/test/img.jpg"}],
+    "voice": "en-US-AriaNeural",
+    "resolution": "9:16"
+  }'
+
+# Check status
+curl http://localhost:8000/api/v1/status/550e8400-e29b-41d4-a716-446655440000
+
+# Download
+curl -O http://localhost:8000/api/v1/download/550e8400-e29b-41d4-a716-446655440000
+```
