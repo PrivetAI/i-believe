@@ -1,26 +1,25 @@
-"""AI Video Generator - Streamlit Application"""
+"""Streamlit UI - calls backend API"""
 import streamlit as st
+import requests
 import uuid
-import shutil
-import sys
 import time
 from pathlib import Path
 from PIL import Image
+import sys
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import config
-from models.slide import Slide
-from services.tts_service import TTSService
-from services.whisper_service import WhisperService
-from services.video_service import VideoService
 from utils.logger import setup_logger, get_logger
 
 # Setup logging
-log_file = Path("logs/app.log")
+log_file = Path("logs/ui.log")
 log_file.parent.mkdir(parents=True, exist_ok=True)
 setup_logger("root", str(log_file))
 logger = get_logger(__name__)
+
+# API Configuration
+API_BASE_URL = "http://localhost:8000/api/v1"
 
 # Page config
 st.set_page_config(page_title="AI Video Generator", page_icon="🎬", layout="wide")
@@ -30,31 +29,20 @@ if 'slides' not in st.session_state:
     st.session_state.slides = []
 if 'generation_id' not in st.session_state:
     st.session_state.generation_id = None
+if 'current_job_id' not in st.session_state:
+    st.session_state.current_job_id = None
 if 'generated_video_path' not in st.session_state:
     st.session_state.generated_video_path = None
 if 'voices_cache' not in st.session_state:
     st.session_state.voices_cache = None
 if 'languages_cache' not in st.session_state:
     st.session_state.languages_cache = None
-if 'last_generation_time' not in st.session_state:
-    st.session_state.last_generation_time = None
 
 
 def get_cache_dir(generation_id: str) -> Path:
     cache_dir = Path("cache") / generation_id
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
-
-
-def cleanup_cache(generation_id: str):
-    if config.CACHE_AUTO_CLEANUP:
-        cache_dir = Path("cache") / generation_id
-        if cache_dir.exists():
-            try:
-                shutil.rmtree(cache_dir)
-                logger.info(f"Cache cleaned up: {generation_id}")
-            except Exception as e:
-                logger.warning(f"Failed to cleanup cache: {e}")
 
 
 def save_uploaded_image(uploaded_file, generation_id: str) -> str:
@@ -73,164 +61,100 @@ def save_uploaded_image(uploaded_file, generation_id: str) -> str:
     return str(file_path)
 
 
-def format_time(seconds: float) -> str:
-    if seconds < 60:
-        return f"{seconds:.1f}s"
-    elif seconds < 3600:
-        minutes = int(seconds // 60)
-        secs = seconds % 60
-        return f"{minutes}m {secs:.1f}s"
-    else:
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        return f"{hours}h {minutes}m"
+def api_get_languages():
+    """Get languages from API"""
+    try:
+        response = requests.get(f"{API_BASE_URL}/languages", timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.error(f"Failed to get languages: {e}")
+        return []
 
 
-def generate_video(slides: list, voice: str, resolution: tuple, generation_id: str):
-    logger.info("=" * 50)
-    logger.info("Starting video generation")
-    logger.info(f"Generation ID: {generation_id}")
-    logger.info(f"Slides: {len(slides)}")
-    logger.info(f"Voice: {voice}")
-    logger.info(f"Resolution: {resolution[0]}x{resolution[1]}")
-    logger.info("=" * 50)
-    
-    start_time = time.time()
-    
-    cache_dir = get_cache_dir(generation_id)
-    audio_dir = cache_dir / "audio"
-    audio_dir.mkdir(exist_ok=True)
-    
+def api_get_voices(language: str):
+    """Get voices from API"""
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/voices",
+            params={"language": language},
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.error(f"Failed to get voices: {e}")
+        return []
+
+
+def api_generate_video(slides_data, voice, resolution):
+    """Submit video generation job via API"""
+    try:
+        payload = {
+            "slides": slides_data,
+            "voice": voice,
+            "resolution": resolution
+        }
+        
+        response = requests.post(
+            f"{API_BASE_URL}/manual/generate",
+            json=payload,
+            timeout=30
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.error(f"Failed to submit job: {e}")
+        raise
+
+
+def api_get_job_status(job_id: str):
+    """Get job status from API"""
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/status/{job_id}",
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.error(f"Failed to get job status: {e}")
+        return None
+
+
+def poll_job_status(job_id: str):
+    """Poll job status until completion"""
     progress_bar = st.progress(0)
     status_text = st.empty()
-    timer_text = st.empty()
     
-    def update_timer():
-        elapsed = time.time() - start_time
-        timer_text.info(f"⏱️ Elapsed time: {format_time(elapsed)}")
-    
-    try:
-        # Step 1: Generate TTS
-        status_text.text("Step 1/4: Generating text-to-speech audio...")
-        update_timer()
-        logger.info("Step 1: Generating TTS audio")
+    while True:
+        status = api_get_job_status(job_id)
         
-        step1_start = time.time()
-        tts_service = TTSService()
-        slide_objects = []
+        if not status:
+            status_text.error("Failed to get job status")
+            break
         
-        for i, slide_data in enumerate(slides):
-            logger.info(f"Generating TTS for slide {i+1}/{len(slides)}")
-            
-            audio_path = audio_dir / f"slide_{i}.mp3"
-            duration = tts_service.generate_audio(
-                slide_data['text'],
-                voice,
-                str(audio_path)
-            )
-            
-            slide_obj = Slide(
-                text=slide_data['text'],
-                image_path=slide_data['image_path'],
-                audio_path=str(audio_path),
-                duration=duration
-            )
-            slide_objects.append(slide_obj)
-            
-            progress = (i + 1) / len(slides) * 0.25
-            progress_bar.progress(progress)
-            update_timer()
+        progress = status.get('progress', 0)
+        current_step = status.get('current_step', 'Processing...')
         
-        step1_time = time.time() - step1_start
-        logger.info(f"TTS generation completed in {step1_time:.2f}s")
+        progress_bar.progress(progress)
+        status_text.text(f"Status: {status['status']} - {current_step}")
         
-        # Step 2: Whisper timestamps
-        status_text.text("Step 2/4: Generating word-level timestamps...")
-        update_timer()
-        logger.info("Step 2: Generating word timestamps")
+        if status['status'] == 'completed':
+            status_text.success("✅ Video generation completed!")
+            return status['video_path']
         
-        step2_start = time.time()
-        whisper_service = WhisperService()
-        words_per_slide = []
+        elif status['status'] == 'failed':
+            error = status.get('error', 'Unknown error')
+            status_text.error(f"❌ Generation failed: {error}")
+            return None
         
-        for i, slide in enumerate(slide_objects):
-            logger.info(f"Transcribing slide {i+1}/{len(slides)}")
-            
-            words = whisper_service.transcribe_with_timestamps(slide.audio_path)
-            words_per_slide.append(words)
-            
-            progress = 0.25 + (i + 1) / len(slides) * 0.25
-            progress_bar.progress(progress)
-            update_timer()
-        
-        step2_time = time.time() - step2_start
-        logger.info(f"Whisper transcription completed in {step2_time:.2f}s")
-        
-        # Step 3: Assemble video
-        status_text.text("Step 3/4: Assembling video...")
-        update_timer()
-        logger.info("Step 3: Assembling video")
-        
-        step3_start = time.time()
-        progress_bar.progress(0.5)
-        
-        video_service = VideoService(resolution)
-        output_dir = Path("output")
-        output_dir.mkdir(exist_ok=True)
-        output_path = output_dir / f"video_{generation_id}.mp4"
-        
-        video_path = video_service.assemble_video(
-            slide_objects,
-            str(output_path),
-            words_per_slide
-        )
-        
-        step3_time = time.time() - step3_start
-        logger.info(f"Video assembly completed in {step3_time:.2f}s")
-        
-        progress_bar.progress(0.75)
-        update_timer()
-        
-        # Step 4: Finalize
-        status_text.text("Step 4/4: Finalizing...")
-        update_timer()
-        progress_bar.progress(1.0)
-        
-        total_time = time.time() - start_time
-        
-        status_text.success(f"✅ Video generation completed!")
-        timer_text.success(f"""
-        ⏱️ **Time Breakdown:**
-        - TTS Audio: {format_time(step1_time)}
-        - Whisper Timestamps: {format_time(step2_time)}
-        - Video Assembly: {format_time(step3_time)}
-        - **Total: {format_time(total_time)}**
-        """)
-        
-        logger.info("Video generation successful")
-        logger.info(f"Output: {video_path}")
-        logger.info(f"Total time: {total_time:.2f}s")
-        
-        st.session_state.last_generation_time = total_time
-        cleanup_cache(generation_id)
-        
-        return video_path
-        
-    except Exception as e:
-        elapsed = time.time() - start_time
-        logger.error(f"Video generation failed after {elapsed:.2f}s: {e}", exc_info=True)
-        status_text.error(f"❌ Error: {str(e)}")
-        timer_text.warning(f"⏱️ Failed after {format_time(elapsed)}")
-        progress_bar.empty()
-        raise
+        time.sleep(1)
 
 
 # Main UI
 st.title("🎬 AI Video Generator")
 st.markdown("Generate short-form videos with AI-powered voiceover and subtitles")
-
-if st.session_state.last_generation_time:
-    st.info(f"⏱️ Last generation took: **{format_time(st.session_state.last_generation_time)}**")
 
 # Sidebar - Configuration
 with st.sidebar:
@@ -241,32 +165,24 @@ with st.sidebar:
     
     if st.session_state.languages_cache is None:
         with st.spinner("Loading languages..."):
-            try:
-                st.session_state.languages_cache = TTSService.get_languages()
-            except Exception as e:
-                st.error(f"Failed to load languages: {e}")
-                st.session_state.languages_cache = []
+            st.session_state.languages_cache = api_get_languages()
     
     if st.session_state.languages_cache:
         selected_language = st.selectbox(
             "Language",
             st.session_state.languages_cache,
-            index=0 if st.session_state.languages_cache else None
+            index=0
         )
         
         if st.button("Load Voices") or st.session_state.voices_cache is not None:
             if st.session_state.voices_cache is None:
                 with st.spinner("Loading voices..."):
-                    try:
-                        voices = TTSService.get_voices(selected_language)
-                        st.session_state.voices_cache = voices
-                    except Exception as e:
-                        st.error(f"Failed to load voices: {e}")
-                        st.session_state.voices_cache = []
+                    voices = api_get_voices(selected_language)
+                    st.session_state.voices_cache = voices
         
         if st.session_state.voices_cache:
             voice_options = {
-                f"{v['ShortName']} ({v.get('Gender', 'Unknown')})": v['ShortName']
+                f"{v['short_name']} ({v.get('gender', 'Unknown')})": v['short_name']
                 for v in st.session_state.voices_cache
             }
             
@@ -287,7 +203,6 @@ with st.sidebar:
         list(config.VIDEO_RESOLUTIONS.keys()),
         index=0
     )
-    resolution = config.VIDEO_RESOLUTIONS[resolution_choice]
 
 # Main Content
 st.header("📝 Manual Upload Mode")
@@ -372,17 +287,36 @@ if st.session_state.slides:
         if not selected_voice:
             st.error("Please select a voice")
         else:
-            generation_id = str(uuid.uuid4())
+            # Prepare slides data for API
+            slides_data = [
+                {
+                    "text": slide['text'],
+                    "image_path": slide['image_path']
+                }
+                for slide in st.session_state.slides
+            ]
             
-            with st.spinner("Generating video..."):
+            with st.spinner("Submitting job..."):
                 try:
-                    video_path = generate_video(
-                        st.session_state.slides,
+                    # Submit job to API
+                    result = api_generate_video(
+                        slides_data,
                         selected_voice,
-                        resolution,
-                        generation_id
+                        resolution_choice
                     )
-                    st.session_state.generated_video_path = video_path
+                    
+                    job_id = result['job_id']
+                    st.session_state.current_job_id = job_id
+                    
+                    logger.info(f"Job submitted: {job_id}")
+                    
+                    # Poll for completion
+                    video_path = poll_job_status(job_id)
+                    
+                    if video_path:
+                        st.session_state.generated_video_path = video_path
+                        st.rerun()
+                    
                 except Exception as e:
                     st.error(f"Failed: {str(e)}")
                     logger.error(f"Generation error: {e}", exc_info=True)
@@ -417,13 +351,14 @@ if st.session_state.generated_video_path:
         
         with col2:
             file_size_mb = video_path.stat().st_size / (1024 * 1024)
+            resolution = config.VIDEO_RESOLUTIONS[resolution_choice]
             st.caption(f"📊 File size: {file_size_mb:.2f} MB | Resolution: {resolution[0]}x{resolution[1]}")
     else:
         st.error("Video file not found")
 
 # Logs
 with st.expander("📋 View Logs"):
-    log_file_path = Path("logs/app.log")
+    log_file_path = Path("logs/ui.log")
     if log_file_path.exists():
         try:
             with open(log_file_path, 'r') as f:

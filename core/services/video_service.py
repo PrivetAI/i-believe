@@ -11,9 +11,9 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import config
-from models.slide import Slide
-from utils.logger import get_logger
-from utils.effects import KenBurnsEffect, CustomTransitions, SubtitleEffect
+from core.models.slide import Slide
+from core.utils.logger import get_logger
+from core.utils.effects import KenBurnsEffect, CustomTransitions, SubtitleEffect
 
 logger = get_logger(__name__)
 

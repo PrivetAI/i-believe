@@ -3,7 +3,7 @@ Whisper service for speech-to-text with word-level timestamps
 """
 from faster_whisper import WhisperModel
 from typing import List, Dict
-from utils.logger import get_logger
+from core.utils.logger import get_logger
 import config
 
 logger = get_logger(__name__)

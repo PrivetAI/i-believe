@@ -1,93 +1,177 @@
 # 🎬 AI Video Generator
 
-Local Streamlit application for building short-form videos from manually prepared slides. Each slide combines your text and imagery, and the app produces a voiced video with word-level subtitles, Ken Burns motion, and smooth transitions.
+**FastAPI + Streamlit** application for building short-form videos from manually prepared slides. Each slide combines text and imagery, producing a voiced video with word-level subtitles, Ken Burns motion, and dynamic transitions.
 
-## Highlights
-- Manual slide builder with unlimited slides (text + image per slide)
-- Edge TTS integration with on-demand language/voice loading and per-slide audio caching
-- Word-by-word subtitles rendered at the center of the frame (white text with black outline)
-- Ken Burns zoom/pan motion plus crossfade transitions between slides
-- Automatic cleanup of intermediate cache files after a successful render
-- Built-in log viewer and persistent volumes for generated videos, cache, and Whisper models
+## 🏗️ Architecture
 
-## Project Layout
+The project is split into **two isolated layers**:
+
+### 1. **Backend API** (`api/` + `core/`)
+- FastAPI REST API for video generation
+- Isolated business logic (pipeline, services)
+- Supports two modes:
+  - **Manual mode**: Local images (current workflow)
+  - **External mode**: Images from URLs (for future AI integration)
+- Background job processing with progress tracking
+
+### 2. **Frontend UI** (`ui/`)
+- Streamlit interface for manual slide creation
+- Communicates with backend via HTTP API
+- Real-time job status polling
+
+This architecture allows **complete isolation** for future AI content generation module.
+
+---
+
+## ✨ Features
+
+- **Manual slide builder** with unlimited slides (text + image per slide)
+- **Edge TTS integration** with on-demand language/voice loading and per-slide audio caching
+- **Word-by-word subtitles** rendered at center with smooth fade effects
+- **Ken Burns motion** (zoom/pan) on each slide
+- **Dynamic transitions** between slides:
+  - Glitch effect (CapCut-style RGB shift + noise)
+  - Flash transition (white flash)
+  - Zoom punch (explosive zoom with shake)
+- **Background job processing** with progress tracking
+- **REST API** for integration with external systems
+- **Automatic cleanup** of intermediate cache files after successful render
+- **Built-in log viewer** and persistent volumes
+
+---
+
+## 📁 Project Structure
+
 ```
-video2/
-├── app/
-│   ├── main.py                 # Streamlit UI and end-to-end workflow
-│   ├── config.py               # Runtime configuration
-│   ├── models/
-│   │   └── slide.py            # Slide dataclass
+video-generator/
+├── api/                              # FastAPI Backend
+│   ├── main.py                       # FastAPI application
+│   ├── routes.py                     # API endpoints
+│   └── schemas.py                    # Pydantic models
+│
+├── core/                             # Business Logic (isolated)
+│   ├── pipeline.py                   # Video generation pipeline
 │   ├── services/
-│   │   ├── tts_service.py      # Microsoft Edge TTS integration
-│   │   ├── whisper_service.py  # Faster-Whisper wrapper for word timestamps
-│   │   └── video_service.py    # Slide assembly, effects, and export
+│   │   ├── tts_service.py            # Edge TTS integration
+│   │   ├── whisper_service.py        # Faster-Whisper timestamps
+│   │   └── video_service.py          # FFmpeg video assembly
+│   ├── models/
+│   │   └── slide.py                  # Slide dataclass
 │   └── utils/
-│       ├── ken_burns.py        # Ken Burns parameters and application
-│       ├── subtitle_renderer.py # Centered single-word subtitle renderer
-│       ├── transitions.py      # Crossfade transitions between clips
-│       └── logger.py           # Logger setup and helpers
-├── cache/                      # Ephemeral files (images, audio, whisper temp)
-├── logs/                       # Application logs
-├── output/                     # Final MP4 renders
+│       ├── effects.py                # Ken Burns + Transitions + Subtitles
+│       └── logger.py                 # Logger setup
+│
+├── ui/                               # Streamlit Frontend
+│   └── app.py                        # Streamlit interface (API client)
+│
+├── cache/                            # Temporary files (ephemeral)
+├── logs/                             # Application logs
+├── output/                           # Final MP4 renders
+│
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
-└── specification.md
+└── config.py                         # Configuration
 ```
 
-## Setup
+---
+
+## 🚀 Setup
 
 ### Prerequisites
-- Docker and Docker Compose (recommended path)
-- At least 8 GB RAM and a modern CPU (Whisper runs on CPU)
-- Stable internet connection for Edge TTS voice list and first Whisper model download
+- Docker and Docker Compose (recommended)
+- At least 8 GB RAM and modern CPU
+- Internet connection for Edge TTS and Whisper model download
 
-### Run with Docker Compose
+### Quick Start with Docker Compose
+
 ```bash
 git clone <repository-url>
-cd video2
+cd video-generator
 docker-compose up --build
 ```
 
-Open `http://localhost:8501` in your browser. The compose file mounts `./output`, `./cache`, and `./logs` so the files stay on the host, and keeps the Whisper model cache in a named volume (`whisper-cache`).
+**Services:**
+- API: `http://localhost:8000` (Swagger docs at `/docs`)
+- UI: `http://localhost:8501`
 
-### Run locally without Docker
-1. Install system dependencies (example for Ubuntu/Debian):
+Volumes are mounted for `./output`, `./cache`, and `./logs`.
+
+### Local Setup (without Docker)
+
+1. **Install system dependencies** (Ubuntu/Debian):
    ```bash
    sudo apt-get update
    sudo apt-get install ffmpeg imagemagick libsm6 libxext6 libxrender-dev
    ```
-   Install the Montserrat font (or place `Montserrat-Bold.ttf` alongside the app) for subtitle rendering quality.
-2. Install Python requirements:
+
+2. **Install Python requirements**:
    ```bash
    pip install -r requirements.txt
    ```
-3. Start the Streamlit app:
+
+3. **Start Backend API**:
    ```bash
-   streamlit run app/main.py
+   cd api
+   uvicorn main:app --host 0.0.0.0 --port 8000 --reload
    ```
 
-## Workflow
-1. **Launch the app.** The sidebar loads available Edge TTS languages on first render. If it fails, check your internet connection and rerun.
-2. **Pick a voice.** Choose a language, press `Load Voices`, and select a voice from the dropdown. A voice is required before you can start rendering.
-3. **Configure resolution.** Choose between vertical `9:16 (1080x1920)` and horizontal `16:9 (1920x1080)` output.
-4. **Add slides.**
-   - Enter the narration text for the slide.
-   - Upload an image (`.jpg`, `.jpeg`, `.png`, up to 10 MB).
-   - Click `➕ Add Slide`. The image is copied to `cache/<generation_id>/images`.
-5. **Manage the slide list.** Expand slides to preview text and imagery, delete individual slides, or clear the whole list to start over.
-6. **Generate the video.** Click `🎬 Generate Video` (enabled once a voice is selected). The app runs four sequential steps with a progress bar:
-   - text-to-speech audio synthesis per slide,
-   - Whisper transcription for word-level timestamps,
-   - video assembly with Ken Burns and crossfades,
-   - final MP4 export to `output/video_<uuid>.mp4`.
-7. **Review the result.** The video appears in the UI for playback and download. File size and resolution are shown next to the download button.
-8. **Check logs if needed.** Expand the "📋 View Logs" panel or inspect `logs/app.log` on disk for the last 100 lines of context.
-9. **Cleanup.** On success, intermediate artifacts in `cache/<generation_id>` are deleted automatically (`CACHE_AUTO_CLEANUP = True`). Failed runs keep the cache for inspection.
+4. **Start Frontend UI** (in another terminal):
+   ```bash
+   cd ui
+   streamlit run app.py --server.port 8501
+   ```
 
-## Configuration
-Key options live in `app/config.py`:
+---
+
+## 🎯 Workflow
+
+### Manual Mode (Current)
+
+1. **Open UI** at `http://localhost:8501`
+2. **Select voice**:
+   - Choose language → Click "Load Voices" → Select voice
+3. **Configure resolution**: Vertical `9:16` or Horizontal `16:9`
+4. **Add slides**:
+   - Enter narration text
+   - Upload image (JPG/PNG, up to 10 MB)
+   - Click "➕ Add Slide"
+5. **Generate video**:
+   - Click "🎬 Generate Video"
+   - Monitor progress in real-time
+6. **Download**: Video appears for playback and download
+
+### API Mode (for External Integration)
+
+```bash
+# Submit job
+curl -X POST http://localhost:8000/api/v1/external/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "slides": [
+      {
+        "text": "Welcome to our video",
+        "image_url": "http://example.com/image1.jpg"
+      }
+    ],
+    "voice": "en-US-AriaNeural",
+    "resolution": "9:16"
+  }'
+
+# Response: {"job_id": "abc123", "status": "queued"}
+
+# Poll status
+curl http://localhost:8000/api/v1/status/abc123
+
+# Download video
+curl -O http://localhost:8000/api/v1/download/abc123
+```
+
+---
+
+## ⚙️ Configuration
+
+Edit `config.py`:
 
 ```python
 # Video output
@@ -95,62 +179,129 @@ VIDEO_RESOLUTIONS = {
     "9:16 (TikTok/Reels)": (1080, 1920),
     "16:9 (YouTube)": (1920, 1080),
 }
-DEFAULT_FPS = 30
-DEFAULT_CODEC = "libx264"
-DEFAULT_AUDIO_CODEC = "aac"
-CRF = 23
-MIN_SLIDE_DURATION = 5.0
+DEFAULT_FPS = 20
+CRF = 23  # Lower = better quality (18-28)
+MOVIEPY_PRESET = 'medium'  # veryfast/fast/medium/slow
 
 # Ken Burns motion
-KEN_BURNS_ZOOM_RANGE = (1.0, 1.5)
-KEN_BURNS_PAN_RANGE = (0.1, 0.2)
-KEN_BURNS_DIRECTIONS = [
-    "zoom_in", "zoom_out",
-    "pan_left", "pan_right", "pan_up", "pan_down",
-]
+ENABLE_KEN_BURNS = True
+KEN_BURNS_ZOOM_RANGE = (1.0, 1.15)
+KEN_BURNS_PAN_RANGE = (0.03, 0.08)
 
-# Transitions (currently rendered as crossfades)
-TRANSITION_DURATION = 0.5
+# Transitions
+TRANSITION_DURATION = 0.3  # seconds
 
-# Subtitle styling
-SUBTITLE_FONT = "Montserrat-Bold"
+# Subtitles
 SUBTITLE_FONT_SIZE = 70
-SUBTITLE_COLOR = "white"
-SUBTITLE_OUTLINE_COLOR = "black"
-SUBTITLE_OUTLINE_WIDTH = 5
-SUBTITLE_LINE_SPACING = 0.4
-SUBTITLE_POSITION = "center"
 
-# Whisper + cache
-WHISPER_MODEL = "small"
+# Whisper
+WHISPER_MODEL = "small"  # tiny/base/small/medium/large
+
+# Cache
 CACHE_AUTO_CLEANUP = True
-ALLOWED_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png"]
-MAX_IMAGE_SIZE_MB = 10
 ```
 
-Adjust these values to tune output quality, subtitle look, or supported upload formats. Remember to rebuild the Docker image after changes if you are running inside a container.
+---
 
-## Troubleshooting
-- **Cannot load languages/voices** - Ensure outbound internet access. Edge TTS requires it to list voices. Retry after network is restored.
-- **Whisper download takes a long time** - The first transcription downloads the `small` model into the `whisper-cache` volume. Subsequent runs reuse it.
-- **Video generation fails** - Review `logs/app.log` and confirm uploaded images are valid and under the size limit. Check available RAM (8 GB recommended).
-- **Subtitles look jagged** - Install the Montserrat font on the host (if running outside Docker) so `subtitle_renderer.py` can load it.
-- **Transitions look the same** - The current implementation applies crossfade-style transitions even though additional types are listed. Customize `utils/transitions.py` if you need more effects.
+## 🔌 API Endpoints
 
-## Logs
-Logs are written to `logs/app.log` and surfaced inside the UI (`📋 View Logs`). Each major step in the pipeline is recorded with timestamps:
+### Video Generation
+
+**POST** `/api/v1/manual/generate` - Generate from local images
+**POST** `/api/v1/external/generate` - Generate from URLs (for AI integration)
+
+**Request Body**:
+```json
+{
+  "slides": [
+    {
+      "text": "Slide narration",
+      "image_path": "/cache/xxx/img1.jpg"  // manual mode
+      // OR
+      "image_url": "http://..."             // external mode
+    }
+  ],
+  "voice": "en-US-AriaNeural",
+  "resolution": "9:16"
+}
 ```
-[2025-01-15 14:23:45] [INFO] [video_service] Assembling video with 4 slides
-[2025-01-15 14:23:46] [INFO] [subtitle_renderer] Rendering 128 word-by-word subtitles
+
+**Response**:
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "queued"
+}
 ```
 
-## Roadmap
-- ⏳ AI-assisted script/image generation workflow (OpenAI + SDXL)
-- ⏳ Background music and SFX layer
-- ⏳ Custom subtitle themes and font uploads
-- ⏳ Batch rendering queue
-- ⏳ Direct publishing integrations
+### Job Management
 
-## License
+**GET** `/api/v1/status/{job_id}` - Get job status and progress
 
-MIT License - enjoy, modify, and ship your own videos.
+**Response**:
+```json
+{
+  "job_id": "...",
+  "status": "processing",  // queued|processing|completed|failed
+  "progress": 0.65,
+  "current_step": "Assembling video...",
+  "video_path": null
+}
+```
+
+**GET** `/api/v1/download/{job_id}` - Download completed video
+
+### Voice Management
+
+**GET** `/api/v1/languages` - List available languages
+**GET** `/api/v1/voices?language=en-US` - List voices for language
+
+---
+
+## 🐛 Troubleshooting
+
+**Cannot load languages/voices**
+- Ensure internet connection (Edge TTS requires it)
+- Check API logs: `logs/api.log`
+
+**Whisper download takes long**
+- First run downloads `small` model (~500MB)
+- Uses `whisper-cache` Docker volume for persistence
+
+**Video generation fails**
+- Check `logs/api.log` for errors
+- Verify uploaded images are valid and under 10MB
+- Ensure 8GB+ RAM available
+
+**Transitions look same**
+- Transitions are randomized each time
+- Check `TRANSITION_DURATION` in `config.py`
+
+---
+
+## 📊 Logs
+
+Logs are written to:
+- API: `logs/api.log`
+- UI: `logs/ui.log`
+
+View in UI via "📋 View Logs" panel or check files directly.
+
+---
+
+## 🗺️ Roadmap
+
+- ✅ FastAPI backend with job queue
+- ✅ Manual mode with local uploads
+- ✅ External mode for AI integration
+- ⏳ Redis/Celery for production job queue
+- ⏳ AI content generator (separate project)
+- ⏳ Background music and SFX
+- ⏳ Custom subtitle themes
+- ⏳ Batch rendering
+
+---
+
+## 📝 License
+
+MIT License - build, modify, and ship your own videos.

@@ -6,7 +6,7 @@ import edge_tts
 from pathlib import Path
 from typing import List, Dict
 from pydub import AudioSegment
-from utils.logger import get_logger
+from core.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
