@@ -6,6 +6,14 @@ from ai_services.prompt_manager import PromptManager
 from ai_services.openrouter_client import OpenRouterClient
 from ai_services.replicate_client import ReplicateClient
 from api_client import VideoGeneratorClient
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="go", page_icon="🤖", layout="wide")
 
@@ -41,12 +49,12 @@ with st.sidebar:
         replicate_key = st.text_input("Replicate API Key", type="password", value=os.getenv("REPLICATE_API_TOKEN", ""))
     
     with st.expander("🎨 Models & Settings"):
-        text_model = st.text_input("Text Model", value=pm.get_model("text_model"))
+        text_model = st.text_input("Text Model", value=pm.get_model("text_model") or "deepseek/deepseek-r1-distill-qwen-32b")
         if st.button("💾 Save Text Model"):
             pm.set_model("text_model", text_model)
             st.success("Saved!")
         
-        image_model = st.text_input("Image Model", value=pm.get_model("image_model"))
+        image_model = st.text_input("Image Model", value=pm.get_model("image_model") or "stability-ai/sdxl")
         if st.button("💾 Save Image Model"):
             pm.set_model("image_model", image_model)
             st.success("Saved!")
@@ -56,6 +64,8 @@ with st.sidebar:
     
     with st.expander("🎭 Image Styles"):
         styles = pm.get_styles()
+        if not styles:
+            styles = ["Cinematic photography, dramatic lighting"]
         selected_style = st.selectbox("Default Style", styles)
         
         new_style = st.text_input("Add New Style")
@@ -93,23 +103,32 @@ with tab1:
     if st.button("🎬 Generate Script", disabled=not openrouter_key or not topic):
         with st.spinner("Generating script..."):
             try:
+                logger.info(f"=== Генерация скрипта начата ===")
+                logger.info(f"Тема: {topic}")
+                
                 client = OpenRouterClient(openrouter_key)
+                current_text_model = pm.get_model("text_model") or text_model
                 prompt = pm.get_prompt("master").format(topic=topic)
                 
-                # Сохраняем промпт
+                logger.info(f"Модель: {current_text_model}")
+                logger.info(f"Промпт ({len(prompt)} символов):\n{prompt}")
+                
                 st.session_state.intermediate_results['script_prompt'] = prompt
                 
-                script = client.generate(prompt, text_model, max_tokens=500)
+                script = client.generate(prompt, current_text_model, max_tokens=1500)
                 
-                # Сохраняем raw результат
+                logger.info(f"Результат ({len(script)} символов):\n{script}")
+                logger.info(f"=== Генерация скрипта завершена ===\n")
+                
                 st.session_state.intermediate_results['script_raw'] = script
                 st.session_state.script = script
                 
                 st.success("Script generated!")
+                st.rerun()
             except Exception as e:
+                logger.error(f"Ошибка генерации скрипта: {e}", exc_info=True)
                 st.error(f"Error: {e}")
     
-    # Показываем промежуточные результаты
     if st.session_state.intermediate_results['script_prompt']:
         with st.expander("📋 Промпт для генерации скрипта", expanded=False):
             st.code(st.session_state.intermediate_results['script_prompt'], language=None)
@@ -134,15 +153,21 @@ with tab2:
         if st.button("✂️ Split Script", disabled=not openrouter_key):
             with st.spinner("Splitting script..."):
                 try:
+                    logger.info(f"=== Разбивка скрипта начата ===")
+                    
                     client = OpenRouterClient(openrouter_key)
+                    current_text_model = pm.get_model("text_model") or text_model
                     prompt = pm.get_prompt("split").format(script=st.session_state.script)
                     
-                    # Сохраняем промпт
+                    logger.info(f"Модель: {current_text_model}")
+                    logger.info(f"Промпт ({len(prompt)} символов):\n{prompt}")
+                    
                     st.session_state.intermediate_results['split_prompt'] = prompt
                     
-                    response = client.generate(prompt, text_model, max_tokens=2000)
+                    response = client.generate(prompt, current_text_model, max_tokens=2000)
                     
-                    # Сохраняем raw ответ
+                    logger.info(f"Raw ответ ({len(response)} символов):\n{response}")
+                    
                     st.session_state.intermediate_results['split_raw'] = response
                     
                     response = response.strip()
@@ -154,18 +179,22 @@ with tab2:
                         response = response[:-3]
                     
                     slides = json.loads(response.strip())
+                    logger.info(f"Получено слайдов: {len(slides)}")
+                    logger.info(f"=== Разбивка скрипта завершена ===\n")
+                    
                     st.session_state.slides = slides
                     st.success(f"Split into {len(slides)} slides!")
+                    st.rerun()
                 except Exception as e:
+                    logger.error(f"Ошибка разбивки скрипта: {e}", exc_info=True)
                     st.error(f"Error: {e}")
         
-        # Показываем промежуточные результаты
         if st.session_state.intermediate_results['split_prompt']:
             with st.expander("📋 Промпт для разбивки", expanded=False):
                 st.code(st.session_state.intermediate_results['split_prompt'], language=None)
         
         if st.session_state.intermediate_results['split_raw']:
-            with st.expander("🔍 Raw JSON от AI", expanded=True):
+            with st.expander("🔍 Raw JSON от AI", expanded=False):
                 st.code(st.session_state.intermediate_results['split_raw'], language="json")
         
         if st.session_state.slides:
@@ -201,8 +230,16 @@ with tab3:
             status_text = st.empty()
             
             try:
+                logger.info(f"=== Генерация изображений начата ===")
+                
                 text_client = OpenRouterClient(openrouter_key)
                 image_client = ReplicateClient(replicate_key)
+                current_text_model = pm.get_model("text_model") or text_model
+                current_image_model = pm.get_model("image_model") or image_model
+                
+                logger.info(f"Text модель: {current_text_model}")
+                logger.info(f"Image модель: {current_image_model}")
+                logger.info(f"Стиль: {selected_style}")
                 
                 output_dir = Path("cache/ai_images")
                 output_dir.mkdir(parents=True, exist_ok=True)
@@ -210,6 +247,9 @@ with tab3:
                 total = len(st.session_state.slides)
                 
                 for i, slide in enumerate(st.session_state.slides):
+                    logger.info(f"--- Слайд {i+1}/{total} ---")
+                    logger.info(f"Текст слайда: {slide['text']}")
+                    
                     status_text.text(f"Generating image {i+1}/{total}...")
                     
                     img_prompt_text = pm.get_prompt("image").format(
@@ -218,28 +258,35 @@ with tab3:
                         style=selected_style
                     )
                     
-                    # Сохраняем промпт для генерации промпта изображения
+                    logger.info(f"Промпт для генерации промпта:\n{img_prompt_text}")
+                    
                     st.session_state.intermediate_results['image_prompts'][i] = img_prompt_text
                     
-                    img_prompt = text_client.generate(img_prompt_text, text_model, max_tokens=200)
+                    img_prompt = text_client.generate(img_prompt_text, current_text_model, max_tokens=200)
                     
-                    # Сохраняем финальный промпт для изображения
+                    logger.info(f"Финальный промпт изображения:\n{img_prompt}")
+                    
                     st.session_state.intermediate_results['image_generation_prompts'][i] = img_prompt
                     
                     img_path = image_client.generate_image(
                         img_prompt,
-                        image_model,
+                        current_image_model,
                         width=width,
                         height=height,
                         output_dir=output_dir
                     )
                     
+                    logger.info(f"Изображение сохранено: {img_path}")
+                    
                     st.session_state.images[i] = img_path
                     progress_bar.progress((i + 1) / total)
                 
                 status_text.text("✅ All images generated!")
+                logger.info(f"=== Генерация изображений завершена ===\n")
                 st.success("Images ready! Review below.")
+                st.rerun()
             except Exception as e:
+                logger.error(f"Ошибка генерации изображений: {e}", exc_info=True)
                 st.error(f"Error: {e}")
         
         if st.session_state.images:
