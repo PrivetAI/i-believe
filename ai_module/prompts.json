@@ -1,0 +1,18 @@
+{
+  "prompts": {
+    "master": "Промпт для генерации сценария вирусного информационного видео для TikTok/Reels\nСоздай сценарий вирусного информационного видео для TikTok/Reels на тему {topic}.\nТребования:\n\nОбъем: 100–130 слов\nХук в первые 3 секунды, цепляющий внимание\nЭмоциональный сторителлинг, удерживающий интерес\nСтруктура: Хук → Увлекательное повествование → Кульминация\nРазговорный, динамичный тон\nИспользуй яркие образы, неожиданные факты и пробелы любопытства\nБез акцента на проблему/решение и без призыва к действию (CTA)\n\nВыводи только текст сценария, без заголовков и форматирования.",
+    "split": "Split this video script into 20-25 short segments for slideshow format.\n\nScript:\n{script}\n\nRequirements:\n- Each segment: 1-2 sentences (5-10 words)\n- Logical flow between segments\n- Each segment should be visually descriptive\n- Maintain narrative coherence\n- Output format: JSON array of objects with \"text\" field\n\nExample output:\n[\n  {{\"text\": \"Have you ever wondered why?\"}},\n  {{\"text\": \"The secret lies in timing.\"}}\n]\n\nOutput only valid JSON, no markdown or explanations.",
+    "image": "Create a cinematic image generation prompt for this moment in the video.\n\nFull video script:\n{script}\n\nCurrent slide text: \"{text}\"\n\nTask: Design a visually compelling image that:\n- Supports THIS specific moment in the narrative\n- Fits within the overall story flow\n- Captures the emotional tone\n- Uses cinematic photography style\n- Style preference: {style}\n\nOutput only the detailed image generation prompt, no explanations."
+  },
+  "models": {
+    "text_model": "deepseek/deepseek-r1-distill-qwen-32b",
+    "image_model": "stability-ai/sdxl"
+  },
+  "styles": [
+    "Cinematic photography, dramatic lighting",
+    "Modern minimalist, clean composition",
+    "Vibrant colors, energetic mood",
+    "Dark moody atmosphere, film noir",
+    "Bright natural light, lifestyle photography"
+  ]
+}

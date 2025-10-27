@@ -50,6 +50,7 @@ services:
       - "8502:8502"
     volumes:
       - ./ai_module/cache:/app/cache
+      - ./ai_module/prompts.json:/app/prompts.json
       - ./output:/app/output
     environment:
       - PYTHONUNBUFFERED=1

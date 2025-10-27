@@ -1,67 +1,8 @@
 import json
-import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 PROMPTS_FILE = Path(__file__).parent.parent / "prompts.json"
-
-DEFAULT_PROMPTS = {
-    "master": """Create a viral TikTok/Reels video script about {topic}.
-Requirements:
-- 110-140 words total
-- Hook in first 3 seconds
-- Emotional storytelling
-- Clear structure: Hook → Problem → Solution → CTA
-- Conversational tone
-- Include power words and curiosity gaps
-
-Output only the script text, no titles or formatting.""",
-    
-    "split": """Split this video script into 20-25 short segments for slideshow format.
-
-Script:
-{script}
-
-Requirements:
-- Each segment: 1-2 sentences (5-10 words)
-- Logical flow between segments
-- Each segment should be visually descriptive
-- Maintain narrative coherence
-- Output format: JSON array of objects with "text" field
-
-Example output:
-[
-  {{"text": "Have you ever wondered why?"}},
-  {{"text": "The secret lies in timing."}}
-]
-
-Output only valid JSON, no markdown or explanations.""",
-    
-    "image": """Create a detailed image generation prompt for this text segment:
-"{text}"
-
-Requirements:
-- Cinematic, high-quality photography style
-- Specific composition and lighting details
-- Emotional mood matching the text
-- Avoid text/words in image
-- Style: {style}
-
-Output only the image prompt, no explanations."""
-}
-
-DEFAULT_MODELS = {
-    "text_model": "deepseek/deepseek-r1-distill-qwen-32b",
-    "image_model": "stability-ai/sdxl"
-}
-
-DEFAULT_STYLES = [
-    "Cinematic photography, dramatic lighting",
-    "Modern minimalist, clean composition",
-    "Vibrant colors, energetic mood",
-    "Dark moody atmosphere, film noir",
-    "Bright natural light, lifestyle photography"
-]
 
 class PromptManager:
     def __init__(self):
@@ -73,9 +14,9 @@ class PromptManager:
             with open(self.prompts_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
         return {
-            "prompts": DEFAULT_PROMPTS.copy(),
-            "models": DEFAULT_MODELS.copy(),
-            "styles": DEFAULT_STYLES.copy()
+            "prompts": {},
+            "models": {},
+            "styles": []
         }
     
     def save(self):
@@ -98,7 +39,7 @@ class PromptManager:
         self.save()
     
     def get_styles(self) -> list:
-        return self.data.get("styles", DEFAULT_STYLES.copy())
+        return self.data.get("styles", [])
     
     def add_style(self, style: str):
         if "styles" not in self.data:

@@ -7,7 +7,7 @@ from ai_services.openrouter_client import OpenRouterClient
 from ai_services.replicate_client import ReplicateClient
 from api_client import VideoGeneratorClient
 
-st.set_page_config(page_title="AI Video Generator", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="go", page_icon="🤖", layout="wide")
 
 if 'pm' not in st.session_state:
     st.session_state.pm = PromptManager()
@@ -22,7 +22,7 @@ if 'video_job_id' not in st.session_state:
 
 pm = st.session_state.pm
 
-st.title("🤖 AI Video Generator")
+st.title("🤖 ")
 
 with st.sidebar:
     st.header("⚙️ Configuration")
