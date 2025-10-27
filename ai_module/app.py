@@ -19,6 +19,15 @@ if 'images' not in st.session_state:
     st.session_state.images = {}
 if 'video_job_id' not in st.session_state:
     st.session_state.video_job_id = None
+if 'intermediate_results' not in st.session_state:
+    st.session_state.intermediate_results = {
+        'script_prompt': None,
+        'script_raw': None,
+        'split_prompt': None,
+        'split_raw': None,
+        'image_prompts': {},
+        'image_generation_prompts': {}
+    }
 
 pm = st.session_state.pm
 
@@ -86,11 +95,28 @@ with tab1:
             try:
                 client = OpenRouterClient(openrouter_key)
                 prompt = pm.get_prompt("master").format(topic=topic)
+                
+                # Сохраняем промпт
+                st.session_state.intermediate_results['script_prompt'] = prompt
+                
                 script = client.generate(prompt, text_model, max_tokens=500)
+                
+                # Сохраняем raw результат
+                st.session_state.intermediate_results['script_raw'] = script
                 st.session_state.script = script
+                
                 st.success("Script generated!")
             except Exception as e:
                 st.error(f"Error: {e}")
+    
+    # Показываем промежуточные результаты
+    if st.session_state.intermediate_results['script_prompt']:
+        with st.expander("📋 Промпт для генерации скрипта", expanded=False):
+            st.code(st.session_state.intermediate_results['script_prompt'], language=None)
+    
+    if st.session_state.intermediate_results['script_raw']:
+        with st.expander("🔍 Raw результат от AI", expanded=False):
+            st.code(st.session_state.intermediate_results['script_raw'], language=None)
     
     if st.session_state.script:
         st.subheader("Generated Script")
@@ -110,7 +136,14 @@ with tab2:
                 try:
                     client = OpenRouterClient(openrouter_key)
                     prompt = pm.get_prompt("split").format(script=st.session_state.script)
+                    
+                    # Сохраняем промпт
+                    st.session_state.intermediate_results['split_prompt'] = prompt
+                    
                     response = client.generate(prompt, text_model, max_tokens=2000)
+                    
+                    # Сохраняем raw ответ
+                    st.session_state.intermediate_results['split_raw'] = response
                     
                     response = response.strip()
                     if response.startswith("```json"):
@@ -125,6 +158,15 @@ with tab2:
                     st.success(f"Split into {len(slides)} slides!")
                 except Exception as e:
                     st.error(f"Error: {e}")
+        
+        # Показываем промежуточные результаты
+        if st.session_state.intermediate_results['split_prompt']:
+            with st.expander("📋 Промпт для разбивки", expanded=False):
+                st.code(st.session_state.intermediate_results['split_prompt'], language=None)
+        
+        if st.session_state.intermediate_results['split_raw']:
+            with st.expander("🔍 Raw JSON от AI", expanded=True):
+                st.code(st.session_state.intermediate_results['split_raw'], language="json")
         
         if st.session_state.slides:
             st.subheader(f"Slides ({len(st.session_state.slides)})")
@@ -171,10 +213,18 @@ with tab3:
                     status_text.text(f"Generating image {i+1}/{total}...")
                     
                     img_prompt_text = pm.get_prompt("image").format(
+                        script=st.session_state.script,
                         text=slide["text"],
                         style=selected_style
                     )
+                    
+                    # Сохраняем промпт для генерации промпта изображения
+                    st.session_state.intermediate_results['image_prompts'][i] = img_prompt_text
+                    
                     img_prompt = text_client.generate(img_prompt_text, text_model, max_tokens=200)
+                    
+                    # Сохраняем финальный промпт для изображения
+                    st.session_state.intermediate_results['image_generation_prompts'][i] = img_prompt
                     
                     img_path = image_client.generate_image(
                         img_prompt,
@@ -194,12 +244,31 @@ with tab3:
         
         if st.session_state.images:
             st.subheader("Generated Images")
-            cols = st.columns(3)
             
             for i, img_path in st.session_state.images.items():
-                with cols[i % 3]:
-                    st.image(img_path, caption=f"Slide {i+1}", use_container_width=True)
-                    st.caption(st.session_state.slides[i]["text"])
+                with st.container():
+                    col1, col2 = st.columns([1, 2])
+                    
+                    with col1:
+                        st.image(img_path, caption=f"Slide {i+1}", use_container_width=True)
+                        st.caption(st.session_state.slides[i]["text"])
+                    
+                    with col2:
+                        if i in st.session_state.intermediate_results['image_prompts']:
+                            with st.expander(f"📋 Промпт для генерации промпта #{i+1}", expanded=False):
+                                st.code(
+                                    st.session_state.intermediate_results['image_prompts'][i],
+                                    language=None
+                                )
+                        
+                        if i in st.session_state.intermediate_results['image_generation_prompts']:
+                            with st.expander(f"🎨 Финальный промпт изображения #{i+1}", expanded=False):
+                                st.code(
+                                    st.session_state.intermediate_results['image_generation_prompts'][i],
+                                    language=None
+                                )
+                    
+                    st.divider()
             
             if st.button("✅ Approve Images"):
                 st.success("Images approved! Go to next tab.")
