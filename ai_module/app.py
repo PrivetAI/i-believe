@@ -23,6 +23,8 @@ if 'script' not in st.session_state:
     st.session_state.script = None
 if 'slides' not in st.session_state:
     st.session_state.slides = None
+if 'image_prompts' not in st.session_state:
+    st.session_state.image_prompts = None
 if 'images' not in st.session_state:
     st.session_state.images = {}
 if 'video_job_id' not in st.session_state:
@@ -33,8 +35,8 @@ if 'intermediate_results' not in st.session_state:
         'script_raw': None,
         'split_prompt': None,
         'split_raw': None,
-        'image_prompts': {},
-        'image_generation_prompts': {}
+        'image_prompts_request': None,
+        'image_prompts_raw': None
     }
 
 pm = st.session_state.pm
@@ -49,9 +51,14 @@ with st.sidebar:
         replicate_key = st.text_input("Replicate API Key", type="password", value=os.getenv("REPLICATE_API_TOKEN", ""))
     
     with st.expander("🎨 Models & Settings"):
-        text_model = st.text_input("Text Model", value=pm.get_model("text_model") or "deepseek/deepseek-r1-distill-qwen-32b")
+        text_model = st.text_input("Text Model (Script & Image Prompts)", value=pm.get_model("text_model") or "deepseek/deepseek-r1-distill-qwen-32b")
         if st.button("💾 Save Text Model"):
             pm.set_model("text_model", text_model)
+            st.success("Saved!")
+        
+        split_model = st.text_input("Split Model (Slides)", value=pm.get_model("split_model") or "deepseek/deepseek-r1-distill-qwen-32b")
+        if st.button("💾 Save Split Model"):
+            pm.set_model("split_model", split_model)
             st.success("Saved!")
         
         image_model = st.text_input("Image Model", value=pm.get_model("image_model") or "stability-ai/sdxl")
@@ -74,7 +81,7 @@ with st.sidebar:
             st.rerun()
     
     with st.expander("📝 Prompts", expanded=False):
-        tab1, tab2, tab3 = st.tabs(["Master", "Split", "Image"])
+        tab1, tab2, tab3 = st.tabs(["Master", "Split", "Image Batch"])
         
         with tab1:
             master = st.text_area("Master Prompt", pm.get_prompt("master"), height=200)
@@ -89,9 +96,9 @@ with st.sidebar:
                 st.success("Saved!")
         
         with tab3:
-            image = st.text_area("Image Prompt", pm.get_prompt("image"), height=200)
-            if st.button("💾 Save Image"):
-                pm.set_prompt("image", image)
+            image_batch = st.text_area("Image Batch Prompt", pm.get_prompt("image_batch"), height=200)
+            if st.button("💾 Save Image Batch"):
+                pm.set_prompt("image_batch", image_batch)
                 st.success("Saved!")
 
 tab1, tab2, tab3, tab4 = st.tabs(["1️⃣ Script", "2️⃣ Slides", "3️⃣ Images", "4️⃣ Video"])
@@ -156,15 +163,17 @@ with tab2:
                     logger.info(f"=== Разбивка скрипта начата ===")
                     
                     client = OpenRouterClient(openrouter_key)
-                    current_text_model = pm.get_model("text_model") or text_model
+                    current_split_model = pm.get_model("split_model")
+                    if not current_split_model:
+                        current_split_model = pm.get_model("text_model") or text_model
                     prompt = pm.get_prompt("split").format(script=st.session_state.script)
                     
-                    logger.info(f"Модель: {current_text_model}")
+                    logger.info(f"Модель: {current_split_model}")
                     logger.info(f"Промпт ({len(prompt)} символов):\n{prompt}")
                     
                     st.session_state.intermediate_results['split_prompt'] = prompt
                     
-                    response = client.generate(prompt, current_text_model, max_tokens=2000)
+                    response = client.generate(prompt, current_split_model, max_tokens=2000)
                     
                     logger.info(f"Raw ответ ({len(response)} символов):\n{response}")
                     
@@ -183,6 +192,8 @@ with tab2:
                     logger.info(f"=== Разбивка скрипта завершена ===\n")
                     
                     st.session_state.slides = slides
+                    st.session_state.image_prompts = None
+                    st.session_state.images = {}
                     st.success(f"Split into {len(slides)} slides!")
                     st.rerun()
                 except Exception as e:
@@ -217,6 +228,8 @@ with tab2:
             with col2:
                 if st.button("🔄 Regenerate"):
                     st.session_state.slides = None
+                    st.session_state.image_prompts = None
+                    st.session_state.images = {}
                     st.rerun()
 
 with tab3:
@@ -225,97 +238,150 @@ with tab3:
     if not st.session_state.slides:
         st.warning("Split script first!")
     else:
-        if st.button("🎨 Generate All Images", disabled=not openrouter_key or not replicate_key):
-            progress_bar = st.progress(0)
-            status_text = st.empty()
+        if not st.session_state.image_prompts:
+            if st.button("📝 Generate Image Prompts", disabled=not openrouter_key):
+                with st.spinner("Generating image prompts..."):
+                    try:
+                        logger.info(f"=== Генерация промптов изображений начата ===")
+                        
+                        client = OpenRouterClient(openrouter_key)
+                        current_text_model = pm.get_model("text_model") or text_model
+                        
+                        slides_text = "\n".join([f"{i+1}. {slide['text']}" for i, slide in enumerate(st.session_state.slides)])
+                        
+                        batch_prompt_template = pm.get_prompt("image_batch")
+                        batch_prompt = batch_prompt_template.format(
+                            script=st.session_state.script,
+                            slides=slides_text,
+                            style=selected_style
+                        )
+
+                        logger.info(f"Модель: {current_text_model}")
+                        logger.info(f"Промпт ({len(batch_prompt)} символов):\n{batch_prompt}")
+                        
+                        st.session_state.intermediate_results['image_prompts_request'] = batch_prompt
+                        
+                        response = client.generate(batch_prompt, current_text_model, max_tokens=3000)
+                        
+                        logger.info(f"Raw ответ ({len(response)} символов):\n{response}")
+                        
+                        st.session_state.intermediate_results['image_prompts_raw'] = response
+                        
+                        response = response.strip()
+                        if response.startswith("```json"):
+                            response = response[7:]
+                        if response.startswith("```"):
+                            response = response[3:]
+                        if response.endswith("```"):
+                            response = response[:-3]
+                        
+                        prompts = json.loads(response.strip())
+                        
+                        if len(prompts) != len(st.session_state.slides):
+                            raise ValueError(f"Expected {len(st.session_state.slides)} prompts, got {len(prompts)}")
+                        
+                        logger.info(f"Получено промптов: {len(prompts)}")
+                        logger.info(f"=== Генерация промптов завершена ===\n")
+                        
+                        st.session_state.image_prompts = prompts
+                        st.success(f"Generated {len(prompts)} image prompts!")
+                        st.rerun()
+                    except Exception as e:
+                        logger.error(f"Ошибка генерации промптов: {e}", exc_info=True)
+                        st.error(f"Error: {e}")
             
-            try:
-                logger.info(f"=== Генерация изображений начата ===")
-                
-                text_client = OpenRouterClient(openrouter_key)
-                image_client = ReplicateClient(replicate_key)
-                current_text_model = pm.get_model("text_model") or text_model
-                current_image_model = pm.get_model("image_model") or image_model
-                
-                logger.info(f"Text модель: {current_text_model}")
-                logger.info(f"Image модель: {current_image_model}")
-                logger.info(f"Стиль: {selected_style}")
-                
-                output_dir = Path("cache/ai_images")
-                output_dir.mkdir(parents=True, exist_ok=True)
-                
-                total = len(st.session_state.slides)
-                
-                for i, slide in enumerate(st.session_state.slides):
-                    logger.info(f"--- Слайд {i+1}/{total} ---")
-                    logger.info(f"Текст слайда: {slide['text']}")
-                    
-                    status_text.text(f"Generating image {i+1}/{total}...")
-                    
-                    img_prompt_text = pm.get_prompt("image").format(
-                        script=st.session_state.script,
-                        text=slide["text"],
-                        style=selected_style
+            if st.session_state.intermediate_results['image_prompts_request']:
+                with st.expander("📋 Промпт для генерации промптов", expanded=False):
+                    st.code(st.session_state.intermediate_results['image_prompts_request'], language=None)
+            
+            if st.session_state.intermediate_results['image_prompts_raw']:
+                with st.expander("🔍 Raw JSON от AI", expanded=False):
+                    st.code(st.session_state.intermediate_results['image_prompts_raw'], language="json")
+        
+        if st.session_state.image_prompts:
+            st.subheader(f"Image Prompts ({len(st.session_state.image_prompts)})")
+            
+            edited_prompts = []
+            for i, prompt_obj in enumerate(st.session_state.image_prompts):
+                with st.container():
+                    st.write(f"**Slide {i+1}:** {st.session_state.slides[i]['text']}")
+                    edited_prompt = st.text_area(
+                        f"Image prompt {i+1}",
+                        prompt_obj["prompt"],
+                        key=f"prompt_{i}",
+                        height=100,
+                        label_visibility="collapsed"
                     )
-                    
-                    logger.info(f"Промпт для генерации промпта:\n{img_prompt_text}")
-                    
-                    st.session_state.intermediate_results['image_prompts'][i] = img_prompt_text
-                    
-                    img_prompt = text_client.generate(img_prompt_text, current_text_model, max_tokens=200)
-                    
-                    logger.info(f"Финальный промпт изображения:\n{img_prompt}")
-                    
-                    st.session_state.intermediate_results['image_generation_prompts'][i] = img_prompt
-                    
-                    img_path = image_client.generate_image(
-                        img_prompt,
-                        current_image_model,
-                        width=width,
-                        height=height,
-                        output_dir=output_dir
-                    )
-                    
-                    logger.info(f"Изображение сохранено: {img_path}")
-                    
-                    st.session_state.images[i] = img_path
-                    progress_bar.progress((i + 1) / total)
+                    edited_prompts.append({"prompt": edited_prompt})
+                    st.divider()
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Approve Prompts"):
+                    st.session_state.image_prompts = edited_prompts
+                    st.success("Prompts approved!")
+            with col2:
+                if st.button("🔄 Regenerate Prompts"):
+                    st.session_state.image_prompts = None
+                    st.rerun()
+            
+            st.divider()
+            
+            if st.button("🎨 Generate Images from Prompts", disabled=not replicate_key):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
                 
-                status_text.text("✅ All images generated!")
-                logger.info(f"=== Генерация изображений завершена ===\n")
-                st.success("Images ready! Review below.")
-                st.rerun()
-            except Exception as e:
-                logger.error(f"Ошибка генерации изображений: {e}", exc_info=True)
-                st.error(f"Error: {e}")
+                try:
+                    logger.info(f"=== Генерация изображений начата ===")
+                    
+                    image_client = ReplicateClient(replicate_key)
+                    current_image_model = pm.get_model("image_model") or image_model
+                    
+                    logger.info(f"Image модель: {current_image_model}")
+                    
+                    output_dir = Path("cache/ai_images")
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    total = len(st.session_state.image_prompts)
+                    
+                    for i, prompt_obj in enumerate(st.session_state.image_prompts):
+                        logger.info(f"--- Изображение {i+1}/{total} ---")
+                        logger.info(f"Промпт: {prompt_obj['prompt']}")
+                        
+                        status_text.text(f"Generating image {i+1}/{total}...")
+                        
+                        img_path = image_client.generate_image(
+                            prompt_obj["prompt"],
+                            current_image_model,
+                            width=width,
+                            height=height,
+                            output_dir=output_dir
+                        )
+                        
+                        logger.info(f"Изображение сохранено: {img_path}")
+                        
+                        st.session_state.images[i] = img_path
+                        progress_bar.progress((i + 1) / total)
+                    
+                    status_text.text("✅ All images generated!")
+                    logger.info(f"=== Генерация изображений завершена ===\n")
+                    st.success("Images ready!")
+                    st.rerun()
+                except Exception as e:
+                    logger.error(f"Ошибка генерации изображений: {e}", exc_info=True)
+                    st.error(f"Error: {e}")
         
         if st.session_state.images:
             st.subheader("Generated Images")
             
             for i, img_path in st.session_state.images.items():
-                with st.container():
-                    col1, col2 = st.columns([1, 2])
-                    
-                    with col1:
-                        st.image(img_path, caption=f"Slide {i+1}", use_container_width=True)
-                        st.caption(st.session_state.slides[i]["text"])
-                    
-                    with col2:
-                        if i in st.session_state.intermediate_results['image_prompts']:
-                            with st.expander(f"📋 Промпт для генерации промпта #{i+1}", expanded=False):
-                                st.code(
-                                    st.session_state.intermediate_results['image_prompts'][i],
-                                    language=None
-                                )
-                        
-                        if i in st.session_state.intermediate_results['image_generation_prompts']:
-                            with st.expander(f"🎨 Финальный промпт изображения #{i+1}", expanded=False):
-                                st.code(
-                                    st.session_state.intermediate_results['image_generation_prompts'][i],
-                                    language=None
-                                )
-                    
-                    st.divider()
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    st.image(img_path, caption=f"Slide {i+1}", use_container_width=True)
+                with col2:
+                    st.caption(st.session_state.slides[i]["text"])
+                    st.text(st.session_state.image_prompts[i]["prompt"])
+                st.divider()
             
             if st.button("✅ Approve Images"):
                 st.success("Images approved! Go to next tab.")
