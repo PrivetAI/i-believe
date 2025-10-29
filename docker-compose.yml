@@ -49,9 +49,9 @@ services:
     ports:
       - "8502:8502"
     volumes:
-      - ./ai_module/cache:/app/cache
-      - ./ai_module/prompts.json:/app/prompts.json
-      - ./output:/app/output
+      - ./ai_module:/app  # 👈 Монтируем весь код
+      - ./ai_module/cache:/app/cache  # Переопределяем cache
+      - ./output:/app/output  # Переопределяем output
     environment:
       - PYTHONUNBUFFERED=1
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
@@ -60,7 +60,7 @@ services:
       - api
     restart: unless-stopped
     mem_limit: 1g
-
-
+  
+  
 volumes:
   whisper-cache:

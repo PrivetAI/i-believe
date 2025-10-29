@@ -122,7 +122,7 @@ with tab1:
                 
                 st.session_state.intermediate_results['script_prompt'] = prompt
                 
-                script = client.generate(prompt, current_text_model, max_tokens=1500)
+                script = client.generate(prompt, current_text_model, max_tokens=1500 )
                 
                 logger.info(f"Результат ({len(script)} символов):\n{script}")
                 logger.info(f"=== Генерация скрипта завершена ===\n")
