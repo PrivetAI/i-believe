@@ -13,12 +13,12 @@
     "image_prompts_model": "gemini-2.5-pro"
   },
   "styles": [
+    "Overreaction, emotional, cinematic photography, dramatic lighting",
     "Cinematic photography, dramatic lighting",
     "Modern minimalist, clean composition",
     "Vibrant colors, energetic mood",
     "Dark moody atmosphere, film noir",
-    "Bright natural light, lifestyle photography",
-    "Overreaction, emotional, cinematic photography, dramatic lighting"
+    "Bright natural light, lifestyle photography"
   ],
   "providers": {
     "script": "gemini",
