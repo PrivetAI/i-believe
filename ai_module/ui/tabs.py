@@ -248,6 +248,7 @@ def render_images_tab(pm, api_keys, selected_style, width, height):
                 "imagen": api_keys.get("imagen_key"),
                 "black_forest": api_keys.get("black_forest_key"),
                 "grok": api_keys.get("grok_key"),
+                "stablehorde": api_keys.get("stablehorde_key") or "0000000000",
                 "replicate": api_keys.get("replicate_key")
             }.get(image_provider_id)
             
@@ -275,12 +276,21 @@ def render_images_tab(pm, api_keys, selected_style, width, height):
                         
                         status_text.text(f"Generating image {i+1}/{total}...")
                         
+                        # Progress callback для Stable Horde
+                        def update_horde_progress(status_info):
+                            msg = status_info.get("message", "Processing...")
+                            base_progress = i / total
+                            item_progress = status_info.get("progress", 0) / total
+                            progress_bar.progress(base_progress + item_progress)
+                            status_text.text(f"Image {i+1}/{total}: {msg}")
+                        
                         img_path = image_client.generate_image(
                             prompt_obj["prompt"],
                             current_image_model,
                             width=width,
                             height=height,
-                            output_dir=output_dir
+                            output_dir=output_dir,
+                            progress_callback=update_horde_progress if image_provider_id == "stablehorde" else None
                         )
                         
                         logger.info(f"Изображение сохранено: {img_path}")

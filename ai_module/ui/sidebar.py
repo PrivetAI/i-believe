@@ -20,6 +20,7 @@ def render_sidebar(pm):
         imagen_key = st.text_area("Google Imagen Service Account JSON", height=100, value=os.getenv("IMAGEN_SA_JSON", ""))
         black_forest_key = st.text_input("Black Forest Labs API Key", type="password", value=os.getenv("BFL_API_KEY", ""))
         grok_key = st.text_input("Grok (xAI) API Key", type="password", value=os.getenv("XAI_API_KEY", ""))
+        stablehorde_key = st.text_input("Stable Horde API Key", type="password", value=os.getenv("STABLEHORDE_API_KEY", ""), help="Optional - anonymous access available but slower")
         replicate_key = st.text_input("Replicate API Key", type="password", value=os.getenv("REPLICATE_API_TOKEN", ""))
     
     # === AI Providers & Models ===
@@ -139,9 +140,6 @@ def render_sidebar(pm):
     with st.expander("🖼️ Image Generation", expanded=True):
         image_providers = ImageProvider.get_provider_list()
         
-        # Явно проверяем что Grok есть в списке
-        print(f"Available image providers: {image_providers}")  # Debug
-        
         current_image_provider = pm.get_provider("image_provider") or "imagen"
         image_provider_id = st.selectbox(
             "Image Provider",
@@ -157,6 +155,7 @@ def render_sidebar(pm):
                 "imagen": imagen_key,
                 "black_forest": black_forest_key,
                 "grok": grok_key,
+                "stablehorde": stablehorde_key or "0000000000",  # Anonymous fallback
                 "replicate": replicate_key
             }.get(image_provider_id)
             
@@ -231,6 +230,7 @@ def render_sidebar(pm):
         "imagen_key": imagen_key,
         "black_forest_key": black_forest_key,
         "grok_key": grok_key,
+        "stablehorde_key": stablehorde_key,
         "replicate_key": replicate_key,
         "selected_style": selected_style,
         "width": width,

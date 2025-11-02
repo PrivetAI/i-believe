@@ -4,6 +4,7 @@ from ai_services.image_providers.fal_client import FalClient
 from ai_services.image_providers.imagen_client import ImagenClient
 from ai_services.image_providers.black_forest_client import BlackForestClient
 from ai_services.image_providers.grok_client import GrokClient
+from ai_services.image_providers.stablehorde_client import StableHordeClient
 from ai_services.replicate_client import ReplicateClient
 
 class ImageProvider:
@@ -12,6 +13,7 @@ class ImageProvider:
         "imagen": "Google Imagen",
         "black_forest": "Black Forest Labs",
         "grok": "Grok (xAI)",
+        "stablehorde": "Stable Horde",
         "replicate": "Replicate"
     }
     
@@ -29,6 +31,8 @@ class ImageProvider:
             return BlackForestClient(self.api_key)
         elif self.provider == "grok":
             return GrokClient(self.api_key)
+        elif self.provider == "stablehorde":
+            return StableHordeClient(self.api_key)
         elif self.provider == "replicate":
             return ReplicateClient(self.api_key)
         else:
@@ -43,8 +47,24 @@ class ImageProvider:
         model: str,
         width: int = 1024,
         height: int = 1024,
-        output_dir: Optional[Path] = None
+        output_dir: Optional[Path] = None,
+        progress_callback=None
     ) -> str:
+        """
+        Генерация изображения с опциональным progress callback
+        
+        progress_callback используется только для Stable Horde
+        """
+        if hasattr(self.client, 'generate_image'):
+            # Проверяем, поддерживает ли клиент progress_callback
+            import inspect
+            sig = inspect.signature(self.client.generate_image)
+            if 'progress_callback' in sig.parameters:
+                return self.client.generate_image(
+                    prompt, model, width, height, output_dir, progress_callback
+                )
+        
+        # Для остальных провайдеров без progress callback
         return self.client.generate_image(prompt, model, width, height, output_dir)
     
     @classmethod
