@@ -7,7 +7,7 @@
   },
   "models": {
     "text_model": "deepseek/deepseek-chat-v3-0324:free",
-    "image_model": "stability-ai/sdxl",
+    "image_model": "grok-2-image-1212",
     "split_model": "openai/gpt-oss-20b:free",
     "script_model": "gemini-2.5-pro",
     "image_prompts_model": "gemini-2.5-pro"
@@ -23,6 +23,7 @@
   "providers": {
     "script": "gemini",
     "split": "openrouter",
-    "image_prompts": "gemini"
+    "image_prompts": "gemini",
+    "image_provider": "grok"
   }
 }
