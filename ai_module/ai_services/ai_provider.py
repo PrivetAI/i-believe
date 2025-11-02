@@ -31,20 +31,12 @@ class AIProvider:
     def get_models(self) -> List[Dict[str, str]]:
         """Получить список моделей от провайдера"""
         if self.provider == "openrouter":
-            # OpenRouter не предоставляет list models через API
-            # Возвращаем популярные модели
-            return [
-                {"id": "deepseek/deepseek-r1-distill-qwen-32b", "name": "DeepSeek R1 Distill Qwen 32B"},
-                {"id": "anthropic/claude-3.5-sonnet", "name": "Claude 3.5 Sonnet"},
-                {"id": "google/gemini-2.0-flash-exp:free", "name": "Gemini 2.0 Flash (Free)"},
-                {"id": "openai/gpt-4o", "name": "GPT-4o"},
-                {"id": "openai/gpt-4-turbo", "name": "GPT-4 Turbo"},
-                {"id": "meta-llama/llama-3.3-70b-instruct", "name": "Llama 3.3 70B"}
-            ]
+            # OpenRouter - ручной ввод модели
+            return []
         else:
             return self.client.get_models()
     
-    def generate(self, prompt: str, model: str, max_tokens: int = 2000) -> Optional[str]:
+    def generate(self, prompt: str, model: str, max_tokens: int = 32768) -> Optional[str]:
         """Генерация текста"""
         return self.client.generate(prompt, model, max_tokens)
     
