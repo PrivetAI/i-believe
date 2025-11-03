@@ -28,19 +28,33 @@ class StableHordeClient:
             models_data = response.json()
             
             # Фильтруем только активные image модели
-            active_models = [
-                {
-                    "id": model["name"],
-                    "name": f"{model['name']} (queued: {model.get('queued', 0)})"
-                }
-                for model in models_data
-                if model.get("type") == "image" and model.get("count", 0) > 0
-            ]
+            active_models = []
+            for model in models_data:
+                if model.get("type") == "image" and model.get("count", 0) > 0:
+                    try:
+                        # Безопасное преобразование queued в int
+                        queued = model.get("queued", 0)
+                        if isinstance(queued, float):
+                            queued = int(queued)
+                        elif isinstance(queued, str):
+                            queued = int(float(queued))
+                        
+                        active_models.append({
+                            "id": model["name"],
+                            "name": f"{model['name']} (queued: {queued})",
+                            "queued": queued
+                        })
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Skipping model {model.get('name')} due to invalid queued value: {e}")
+                        continue
             
             # Сортируем по популярности (меньше в очереди = быстрее)
-            active_models.sort(key=lambda x: int(x["name"].split("queued: ")[1].rstrip(")")))
+            active_models.sort(key=lambda x: x.get("queued", 999999))
             
-            if not active_models:
+            # Убираем поле queued из финального результата
+            result = [{"id": m["id"], "name": m["name"]} for m in active_models]
+            
+            if not result:
                 logger.warning("No active models found, using defaults")
                 return [
                     {"id": "Deliberate", "name": "Deliberate"},
@@ -48,7 +62,7 @@ class StableHordeClient:
                     {"id": "DreamShaper", "name": "DreamShaper"}
                 ]
             
-            return active_models[:50]  # Ограничиваем до 50 самых быстрых
+            return result[:50]  # Ограничиваем до 50 самых быстрых
             
         except Exception as e:
             logger.error(f"Failed to fetch Stable Horde models: {e}")

@@ -7,10 +7,10 @@
   },
   "models": {
     "text_model": "deepseek/deepseek-chat-v3-0324:free",
-    "image_model": "grok-2-image-1212",
-    "split_model": "openai/gpt-oss-20b:free",
+    "image_model": "DucHaiten GameArt (Unreal) Pony",
+    "split_model": "gemini-2.0-flash",
     "script_model": "gemini-2.5-pro",
-    "image_prompts_model": "gemini-2.5-pro"
+    "image_prompts_model": "tngtech/deepseek-r1t2-chimera:free"
   },
   "styles": [
     "Overreaction, emotional, cinematic photography, dramatic lighting",
@@ -18,12 +18,13 @@
     "Modern minimalist, clean composition",
     "Vibrant colors, energetic mood",
     "Dark moody atmosphere, film noir",
-    "Bright natural light, lifestyle photography"
+    "Bright natural light, lifestyle photography",
+    "Overreaction, emotional,surreal"
   ],
   "providers": {
     "script": "gemini",
-    "split": "openrouter",
-    "image_prompts": "gemini",
-    "image_provider": "grok"
+    "split": "gemini",
+    "image_prompts": "openrouter",
+    "image_provider": "stablehorde"
   }
 }
