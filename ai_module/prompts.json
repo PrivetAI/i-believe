@@ -7,7 +7,7 @@
   },
   "models": {
     "text_model": "deepseek/deepseek-chat-v3-0324:free",
-    "image_model": "DucHaiten GameArt (Unreal) Pony",
+    "image_model": "black-forest-labs/flux-schnell",
     "split_model": "gemini-2.0-flash",
     "script_model": "gemini-2.5-pro",
     "image_prompts_model": "tngtech/deepseek-r1t2-chimera:free"
@@ -25,6 +25,6 @@
     "script": "gemini",
     "split": "gemini",
     "image_prompts": "openrouter",
-    "image_provider": "stablehorde"
+    "image_provider": "replicate"
   }
 }
